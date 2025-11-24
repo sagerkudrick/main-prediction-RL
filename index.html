@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isotope Box RL Controller</title>
+    <link rel="stylesheet" href="static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <script type="importmap">
+        {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/"
+        }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="canvas-container"></div>
+    <div id="control-panel">
+        <h2>🎮 Control Panel</h2>
+        <button id="start-btn" class="button">Start Simulation</button>
+        <button id="stop-btn" class="button danger" disabled>Stop Simulation</button>
+        <button id="reset-btn" class="button">Reset Crate</button>
+    </div>
+    <div id="diagnostics">
+        <h2>📊 Diagnostics</h2>
+        <div class="diagnostic-item">
+            <label>Step Count</label>
+            <div class="value" id="step-count">0</div>
+        </div>
+        <div class="diagnostic-item success">
+            <label>Predicted Quaternion [x, y, z, w]</label>
+            <div class="value" id="predicted-quat">-</div>
+        </div>
+        <div class="diagnostic-item">
+            <label>Predicted Euler [deg]</label>
+            <div class="value" id="predicted-euler">-</div>
+        </div>
+        <div class="diagnostic-item">
+            <label>Actual Quaternion [x, y, z, w]</label>
+            <div class="value" id="actual-quat">-</div>
+        </div>
+        <div class="diagnostic-item error">
+            <label>Quaternion Error</label>
+            <div class="value">
+                <span id="quat-error">-</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="image-preview">
+        <h3>Inference Camera View</h3>
+        <canvas id="inference-image"></canvas>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155/build/three.module.js';
+        import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.155/examples/jsm/controls/OrbitControls.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.155/examples/jsm/loaders/GLTFLoader.js';
+
+        const PHYSICS_STEPS_PER_FRAME = 4;
+        const INFERENCE_INTERVAL = 15;
+        const MAX_STEPS = 2000;  // Longer simulation (was 500)
+
+        let scene, camera, renderer, controls;
+        let crateMesh, inferenceCrate;
+        let xyzHelper = null;
+        let isSimulating = false;
+        let stepCount = 0, frameCount = 0;
+
+        let position = new THREE.Vector3(0, 0.15, 0);  // Closer to ground
+        let quaternion = new THREE.Quaternion();
+        let velocity = new THREE.Vector3(0, 0, 0);
+        let angularVelocity = new THREE.Vector3(0, 0, 0);
+        const gravity = new THREE.Vector3(0, -9.81, 0);
+        const dt = 1 / 240;
+
+        // ------------------ MAIN SCENE ------------------
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color("#1a1a2e");
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(3, 1, 3);
+        camera.lookAt(0, 0.15, 0);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 0.15, 0);
+
+        const ambientLight = new THREE.AmbientLight(0x404040, 2);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
+        directionalLight.position.set(5, 10, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.MeshStandardMaterial({ color: 0x2a2a3e, roughness: 0.8, metalness: 0.2 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        scene.add(new THREE.GridHelper(20, 20, 0x667eea, 0x3a3a4e));
+
+        // ------------------ CRATE (placeholder) ------------------
+        crateMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.2, 0.2, 0.2),
+            new THREE.MeshStandardMaterial({ color: 0x667eea, roughness: 0.5, metalness: 0.3 })
+        );
+        crateMesh.castShadow = true;
+        crateMesh.receiveShadow = true;
+        scene.add(crateMesh);
+
+        // ------------------ XYZ HELPER (only for main scene) ------------------
+        function createXYZHelper() {
+            if (xyzHelper) xyzHelper.parent?.remove(xyzHelper);
+            xyzHelper = new THREE.Group();
+
+            const axisLength = 0.15;
+            const arrowLength = 0.03;
+            const xAxis = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), axisLength, 0xff0000, arrowLength, arrowLength * 0.5);
+            const yAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), axisLength, 0x00ff00, arrowLength, arrowLength * 0.5);
+            const zAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), axisLength, 0x0000ff, arrowLength, arrowLength * 0.5);
+            xyzHelper.add(xAxis, yAxis, zAxis);
+            crateMesh.add(xyzHelper);
+        }
+        createXYZHelper();
+
+        // ------------------ RESET & PHYSICS ------------------
+        function resetCrate() {
+            position.set(0, 0.15, 0);  // Lower starting height
+            quaternion.setFromEuler(new THREE.Euler(
+                Math.random() * Math.PI * 2,
+                Math.random() * Math.PI * 2,
+                Math.random() * Math.PI * 2
+            ));
+            velocity.set(0, 0, 0);
+            angularVelocity.set(0, 0, 0);
+            stepCount = 0; 
+            frameCount = 0;
+            updateCrateTransform();
+            document.getElementById('step-count').textContent = '0';
+        }
+
+        function updateCrateTransform() {
+            crateMesh.position.copy(position);
+            crateMesh.quaternion.copy(quaternion);
+        }
+
+        function stepPhysics() {
+            velocity.add(gravity.clone().multiplyScalar(dt));
+            position.add(velocity.clone().multiplyScalar(dt));
+            
+            const groundHeight = 0.1;  // Half box height
+            if (position.y < groundHeight) {
+                position.y = groundHeight;
+                velocity.y = Math.max(0, velocity.y);
+                velocity.multiplyScalar(0.95);
+                angularVelocity.multiplyScalar(0.95);
+            }
+            
+            const angle = angularVelocity.length() * dt;
+            if (angle > 0.0001) {
+                const axis = angularVelocity.clone().normalize();
+                const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+                quaternion.multiplyQuaternions(deltaQuat, quaternion).normalize();
+            }
+            
+            angularVelocity.multiplyScalar(0.999);
+            updateCrateTransform();
+        }
+
+        // ------------------ INFERENCE SCENE ------------------
+        const inferenceScene = new THREE.Scene();
+        inferenceScene.background = new THREE.Color(0xffffff);
+        
+        const inferenceCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+        inferenceCamera.position.set(0, 0.15, 0.4);  // Closer to object
+        inferenceCamera.lookAt(0, 0.15, 0);
+
+        const inferenceCanvas = document.getElementById('inference-image');
+        inferenceCanvas.width = 256; 
+        inferenceCanvas.height = 256;
+        const inferenceRenderer = new THREE.WebGLRenderer({ 
+            canvas: inferenceCanvas, 
+            antialias: true, 
+            alpha: false,
+            preserveDrawingBuffer: true
+        });
+        inferenceRenderer.setClearColor(0xffffff, 1);
+        inferenceRenderer.setSize(256, 256);
+
+        // Add lights to inference scene
+        const inferenceAmbient = new THREE.AmbientLight(0xffffff, 0.8);
+        inferenceScene.add(inferenceAmbient);
+        const inferenceDirectional = new THREE.DirectionalLight(0xffffff, 1);
+        inferenceDirectional.position.set(2, 3, 2);
+        inferenceScene.add(inferenceDirectional);
+
+        // ------------------ INFERENCE API ------------------
+        async function runInference() {
+            try {
+                // Convert canvas to base64
+                const base64Image = inferenceCanvas.toDataURL('image/jpeg', 0.9);
+
+                const response = await fetch('/predict_pose', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: base64Image
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Update predicted quaternion display
+                const predQuat = data.quaternion || [0, 0, 0, 1];
+                document.getElementById('predicted-quat').textContent = 
+                    `[${predQuat[0].toFixed(3)}, ${predQuat[1].toFixed(3)}, ${predQuat[2].toFixed(3)}, ${predQuat[3].toFixed(3)}]`;
+                
+                // Update predicted euler display
+                if (data.euler) {
+                    document.getElementById('predicted-euler').textContent = 
+                        `[${data.euler[0].toFixed(1)}°, ${data.euler[1].toFixed(1)}°, ${data.euler[2].toFixed(1)}°]`;
+                }
+                
+                // Calculate quaternion error
+                const actualQuat = crateMesh.quaternion;
+                const error = Math.abs(1 - Math.abs(
+                    actualQuat.x * predQuat[0] + 
+                    actualQuat.y * predQuat[1] + 
+                    actualQuat.z * predQuat[2] + 
+                    actualQuat.w * predQuat[3]
+                ));
+                document.getElementById('quat-error').textContent = error.toFixed(4);
+                
+            } catch (error) {
+                console.error('Inference error:', error);
+                document.getElementById('predicted-quat').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        // ------------------ GLB LOAD ------------------
+        const loader = new GLTFLoader();
+        loader.load('static/models/isotopebox.glb', (gltf) => {
+            console.log('✓ GLB loaded');
+            
+            // Replace main crate
+            if (crateMesh) scene.remove(crateMesh);
+            crateMesh = gltf.scene;
+            crateMesh.scale.set(0.1, 0.1, 0.1);
+            crateMesh.traverse(c => { 
+                if (c.isMesh) { 
+                    c.castShadow = true; 
+                    c.receiveShadow = true;
+                } 
+            });
+            scene.add(crateMesh);
+            createXYZHelper();
+            updateCrateTransform();
+
+            // Create inference crate (NO arrows, materials properly copied)
+            if (inferenceCrate) inferenceScene.remove(inferenceCrate);
+            
+            // Deep clone the scene with materials
+            inferenceCrate = new THREE.Group();
+            crateMesh.traverse((node) => {
+                if (node.isMesh) {
+                    const clonedMesh = new THREE.Mesh(
+                        node.geometry.clone(),
+                        node.material.clone()  // Clone material properly
+                    );
+                    clonedMesh.position.copy(node.position);
+                    clonedMesh.rotation.copy(node.rotation);
+                    clonedMesh.scale.copy(node.scale);
+                    inferenceCrate.add(clonedMesh);
+                }
+            });
+            
+            inferenceScene.add(inferenceCrate);
+            console.log('✓ Inference crate created (no arrows)');
+            
+        }, undefined, (error) => {
+            console.error('Error loading GLB:', error);
+        });
+
+        // ------------------ ANIMATION ------------------
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (isSimulating) {
+                for (let i = 0; i < PHYSICS_STEPS_PER_FRAME; i++) { 
+                    stepPhysics(); 
+                    stepCount++; 
+                }
+                
+                frameCount++;
+                document.getElementById('step-count').textContent = stepCount;
+                
+                // Update actual quaternion display
+                const actualQuat = crateMesh.quaternion;
+                document.getElementById('actual-quat').textContent = 
+                    `[${actualQuat.x.toFixed(3)}, ${actualQuat.y.toFixed(3)}, ${actualQuat.z.toFixed(3)}, ${actualQuat.w.toFixed(3)}]`;
+                
+                // Render inference view and get prediction
+                if (frameCount % INFERENCE_INTERVAL === 0 && inferenceCrate) {
+                    inferenceCrate.position.copy(crateMesh.position);
+                    inferenceCrate.quaternion.copy(crateMesh.quaternion);
+                    inferenceCrate.scale.copy(crateMesh.scale);
+                    inferenceRenderer.render(inferenceScene, inferenceCamera);
+                    
+                    // Call prediction API
+                    runInference();
+                }
+                
+                // Reset conditions: too low or max steps
+                if (position.y < 0.05 || stepCount >= MAX_STEPS) {
+                    resetCrate();
+                }
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ------------------ UI CONTROLS ------------------
+        document.getElementById('start-btn').addEventListener('click', () => {
+            isSimulating = true;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+        });
+
+        document.getElementById('stop-btn').addEventListener('click', () => {
+            isSimulating = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', resetCrate);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        resetCrate();
+        animate();
+    </script>
+</body>
+
+</html>
