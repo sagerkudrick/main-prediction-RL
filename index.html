@@ -4,361 +4,355 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Isotope Box RL Controller</title>
+    <title>Isotope Box RL - Client Side</title>
     <link rel="stylesheet" href="static/css/style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
+
+    <!-- Cannon.js Physics -->
+    <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+
+    <!-- Three.js Import Map -->
     <script type="importmap">
-        {
+    {
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/"
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/",
+            "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"
         }
-        }
+    }
     </script>
 </head>
 
 <body>
-    <div id="canvas-container"></div>
-    <div id="control-panel">
-        <h2>🎮 Control Panel</h2>
-        <button id="start-btn" class="button">Start Simulation</button>
-        <button id="stop-btn" class="button danger" disabled>Stop Simulation</button>
-        <button id="reset-btn" class="button">Reset Crate</button>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div id="loading-status">Initializing...</div>
+        </div>
     </div>
+
+    <!-- Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Control Panel -->
+    <div id="control-panel">
+        <h2>🎮 Controls</h2>
+        <button id="start-btn" class="button">Start</button>
+        <button id="stop-btn" class="button danger" disabled>Stop</button>
+        <button id="reset-btn" class="button">Reset</button>
+
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="rl-enabled-check">
+                Enable RL Rotation
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label>Wall Size: <span id="wall-size-val">1.0</span>m</label>
+            <input type="range" id="wall-size-slider" min="0.5" max="5.0" step="0.1" value="1.0">
+        </div>
+    </div>
+
+    <!-- Diagnostics -->
     <div id="diagnostics">
         <h2>📊 Diagnostics</h2>
         <div class="diagnostic-item">
             <label>Step Count</label>
             <div class="value" id="step-count">0</div>
         </div>
+        <div class="diagnostic-item">
+            <label>Position [x, y, z]</label>
+            <div class="value">
+                <span id="pos-x-val">0.00</span>,
+                <span id="pos-y-val">0.00</span>,
+                <span id="pos-z-val">0.00</span>
+            </div>
+        </div>
         <div class="diagnostic-item success">
-            <label>Predicted Quaternion [x, y, z, w]</label>
+            <label>Predicted Quat</label>
             <div class="value" id="predicted-quat">-</div>
         </div>
         <div class="diagnostic-item">
-            <label>Predicted Euler [deg]</label>
-            <div class="value" id="predicted-euler">-</div>
-        </div>
-        <div class="diagnostic-item">
-            <label>Actual Quaternion [x, y, z, w]</label>
+            <label>Actual Quat</label>
             <div class="value" id="actual-quat">-</div>
         </div>
-        <div class="diagnostic-item error">
-            <label>Quaternion Error</label>
-            <div class="value">
-                <span id="quat-error">-</span>
-            </div>
+        <div class="diagnostic-item">
+            <label>RL Action</label>
+            <div class="value" id="rl-action">-</div>
         </div>
     </div>
 
+    <!-- Inference Preview -->
     <div id="image-preview">
-        <h3>Inference Camera View</h3>
+        <h3>Inference Camera</h3>
         <canvas id="inference-image"></canvas>
     </div>
 
     <script type="module">
-        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155/build/three.module.js';
-        import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.155/examples/jsm/controls/OrbitControls.js';
-        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.155/examples/jsm/loaders/GLTFLoader.js';
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { PhysicsSimulation } from './static/js/physics.js';
+        import { InferenceManager } from './static/js/inference.js';
+        import { SimulationController } from './static/js/simulation.js';
 
-        const PHYSICS_STEPS_PER_FRAME = 4;
         const INFERENCE_INTERVAL = 15;
-        const MAX_STEPS = 2000;  // Longer simulation (was 500)
 
         let scene, camera, renderer, controls;
-        let crateMesh, inferenceCrate;
-        let xyzHelper = null;
-        let isSimulating = false;
-        let stepCount = 0, frameCount = 0;
+        let crateMesh, inferenceCrate, wallGroup;
+        let inferenceCanvas, inferenceRenderer, inferenceScene, inferenceCamera;
 
-        let position = new THREE.Vector3(0, 0.15, 0);  // Closer to ground
-        let quaternion = new THREE.Quaternion();
-        let velocity = new THREE.Vector3(0, 0, 0);
-        let angularVelocity = new THREE.Vector3(0, 0, 0);
-        const gravity = new THREE.Vector3(0, -9.81, 0);
-        const dt = 1 / 240;
+        const simulation = new SimulationController();
 
-        // ------------------ MAIN SCENE ------------------
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color("#1a1a2e");
-
-        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(3, 1, 3);
-        camera.lookAt(0, 0.15, 0);
-
-        renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.target.set(0, 0.15, 0);
-
-        const ambientLight = new THREE.AmbientLight(0x404040, 2);
-        scene.add(ambientLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
-        directionalLight.position.set(5, 10, 5);
-        directionalLight.castShadow = true;
-        scene.add(directionalLight);
-
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 20),
-            new THREE.MeshStandardMaterial({ color: 0x2a2a3e, roughness: 0.8, metalness: 0.2 })
-        );
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        scene.add(ground);
-
-        scene.add(new THREE.GridHelper(20, 20, 0x667eea, 0x3a3a4e));
-
-        // ------------------ CRATE (placeholder) ------------------
-        crateMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.2, 0.2, 0.2),
-            new THREE.MeshStandardMaterial({ color: 0x667eea, roughness: 0.5, metalness: 0.3 })
-        );
-        crateMesh.castShadow = true;
-        crateMesh.receiveShadow = true;
-        scene.add(crateMesh);
-
-        // ------------------ XYZ HELPER (only for main scene) ------------------
-        function createXYZHelper() {
-            if (xyzHelper) xyzHelper.parent?.remove(xyzHelper);
-            xyzHelper = new THREE.Group();
-
-            const axisLength = 0.15;
-            const arrowLength = 0.03;
-            const xAxis = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), axisLength, 0xff0000, arrowLength, arrowLength * 0.5);
-            const yAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), axisLength, 0x00ff00, arrowLength, arrowLength * 0.5);
-            const zAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), axisLength, 0x0000ff, arrowLength, arrowLength * 0.5);
-            xyzHelper.add(xAxis, yAxis, zAxis);
-            crateMesh.add(xyzHelper);
-        }
-        createXYZHelper();
-
-        // ------------------ RESET & PHYSICS ------------------
-        function resetCrate() {
-            position.set(0, 0.15, 0);  // Lower starting height
-            quaternion.setFromEuler(new THREE.Euler(
-                Math.random() * Math.PI * 2,
-                Math.random() * Math.PI * 2,
-                Math.random() * Math.PI * 2
-            ));
-            velocity.set(0, 0, 0);
-            angularVelocity.set(0, 0, 0);
-            stepCount = 0; 
-            frameCount = 0;
-            updateCrateTransform();
-            document.getElementById('step-count').textContent = '0';
+        // Loading overlay functions
+        function updateLoadingStatus(message) {
+            document.getElementById('loading-status').textContent = message;
         }
 
-        function updateCrateTransform() {
-            crateMesh.position.copy(position);
-            crateMesh.quaternion.copy(quaternion);
+        function hideLoadingOverlay() {
+            document.getElementById('loading-overlay').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }, 300);
         }
 
-        function stepPhysics() {
-            velocity.add(gravity.clone().multiplyScalar(dt));
-            position.add(velocity.clone().multiplyScalar(dt));
-            
-            const groundHeight = 0.1;  // Half box height
-            if (position.y < groundHeight) {
-                position.y = groundHeight;
-                velocity.y = Math.max(0, velocity.y);
-                velocity.multiplyScalar(0.95);
-                angularVelocity.multiplyScalar(0.95);
+        function captureInferenceImage(renderer, width = 256, height = 256) {
+            const gl = renderer.getContext();
+            const pixels = new Uint8Array(width * height * 4); // RGBA
+            gl.readPixels(
+                0, 0, width, height,
+                gl.RGBA, gl.UNSIGNED_BYTE,
+                pixels
+            );
+
+            // Flip Y-axis because WebGL origin is bottom-left
+            const flipped = new Uint8Array(width * height * 4);
+            for (let y = 0; y < height; y++) {
+                const srcOffset = y * width * 4;
+                const destOffset = (height - 1 - y) * width * 4;
+                flipped.set(pixels.subarray(srcOffset, srcOffset + width * 4), destOffset);
             }
-            
-            const angle = angularVelocity.length() * dt;
-            if (angle > 0.0001) {
-                const axis = angularVelocity.clone().normalize();
-                const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-                quaternion.multiplyQuaternions(deltaQuat, quaternion).normalize();
-            }
-            
-            angularVelocity.multiplyScalar(0.999);
-            updateCrateTransform();
+
+            return flipped;
         }
 
-        // ------------------ INFERENCE SCENE ------------------
-        const inferenceScene = new THREE.Scene();
-        inferenceScene.background = new THREE.Color(0xffffff);
-        
-        const inferenceCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-        inferenceCamera.position.set(0, 0.15, 0.4);  // Closer to object
-        inferenceCamera.lookAt(0, 0.15, 0);
+        function pixelsToTensor(pixels, width = 256, height = 256) {
+            const data = new Float32Array(3 * width * height);
 
-        const inferenceCanvas = document.getElementById('inference-image');
-        inferenceCanvas.width = 256; 
-        inferenceCanvas.height = 256;
-        const inferenceRenderer = new THREE.WebGLRenderer({ 
-            canvas: inferenceCanvas, 
-            antialias: true, 
-            alpha: false,
-            preserveDrawingBuffer: true
-        });
-        inferenceRenderer.setClearColor(0xffffff, 1);
-        inferenceRenderer.setSize(256, 256);
-
-        // Add lights to inference scene
-        const inferenceAmbient = new THREE.AmbientLight(0xffffff, 0.8);
-        inferenceScene.add(inferenceAmbient);
-        const inferenceDirectional = new THREE.DirectionalLight(0xffffff, 1);
-        inferenceDirectional.position.set(2, 3, 2);
-        inferenceScene.add(inferenceDirectional);
-
-        // ------------------ INFERENCE API ------------------
-        async function runInference() {
-            try {
-                // Convert canvas to base64
-                const base64Image = inferenceCanvas.toDataURL('image/jpeg', 0.9);
-
-                const response = await fetch('/predict_pose', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        image: base64Image
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Server error: ${response.status}`);
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    // Normalize to 0..1 and separate channels
+                    data[y * width + x] = pixels[i] / 255;               // R
+                    data[width * height + y * width + x] = pixels[i + 1] / 255; // G
+                    data[2 * width * height + y * width + x] = pixels[i + 2] / 255; // B
                 }
-
-                const data = await response.json();
-                
-                // Update predicted quaternion display
-                const predQuat = data.quaternion || [0, 0, 0, 1];
-                document.getElementById('predicted-quat').textContent = 
-                    `[${predQuat[0].toFixed(3)}, ${predQuat[1].toFixed(3)}, ${predQuat[2].toFixed(3)}, ${predQuat[3].toFixed(3)}]`;
-                
-                // Update predicted euler display
-                if (data.euler) {
-                    document.getElementById('predicted-euler').textContent = 
-                        `[${data.euler[0].toFixed(1)}°, ${data.euler[1].toFixed(1)}°, ${data.euler[2].toFixed(1)}°]`;
-                }
-                
-                // Calculate quaternion error
-                const actualQuat = crateMesh.quaternion;
-                const error = Math.abs(1 - Math.abs(
-                    actualQuat.x * predQuat[0] + 
-                    actualQuat.y * predQuat[1] + 
-                    actualQuat.z * predQuat[2] + 
-                    actualQuat.w * predQuat[3]
-                ));
-                document.getElementById('quat-error').textContent = error.toFixed(4);
-                
-            } catch (error) {
-                console.error('Inference error:', error);
-                document.getElementById('predicted-quat').textContent = 'Error: ' + error.message;
             }
+
+            return new ort.Tensor('float32', data, [1, 3, height, width]);
         }
 
-        // ------------------ GLB LOAD ------------------
-        const loader = new GLTFLoader();
-        loader.load('static/models/isotopebox.glb', (gltf) => {
-            console.log('✓ GLB loaded');
-            
-            // Replace main crate
-            if (crateMesh) scene.remove(crateMesh);
-            crateMesh = gltf.scene;
-            crateMesh.scale.set(0.1, 0.1, 0.1);
-            crateMesh.traverse(c => { 
-                if (c.isMesh) { 
-                    c.castShadow = true; 
-                    c.receiveShadow = true;
-                } 
-            });
+        async function runInference(session, renderer) {
+            // 1. Capture the image
+            const pixels = captureInferenceImage(renderer);
+
+            // 2. Convert to tensor
+            const inputTensor = pixelsToTensor(pixels);
+
+            // 3. Run ONNX model
+            const feeds = { input: inputTensor }; // adjust key name to your model
+            const output = await session.run(feeds);
+
+            return output;
+        }
+
+
+        // Initialize Three.js scene
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#1a1a2e');
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(3, 1, 3);
+            camera.lookAt(0, 0.3, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.target.set(0, 0.3, 0);
+
+            // Lights
+            scene.add(new THREE.AmbientLight(0x404040, 2));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 3);
+            dirLight.position.set(5, 10, 5);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Ground
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(20, 20),
+                new THREE.MeshStandardMaterial({ color: 0x2a2a3e })
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+            scene.add(new THREE.GridHelper(20, 20, 0x667eea, 0x3a3a4e));
+
+            // Placeholder crate
+            crateMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.2, 0.2, 0.2),
+                new THREE.MeshStandardMaterial({ color: 0x667eea })
+            );
+            crateMesh.castShadow = true;
             scene.add(crateMesh);
-            createXYZHelper();
-            updateCrateTransform();
+        }
 
-            // Create inference crate (NO arrows, materials properly copied)
-            if (inferenceCrate) inferenceScene.remove(inferenceCrate);
-            
-            // Deep clone the scene with materials
-            inferenceCrate = new THREE.Group();
-            crateMesh.traverse((node) => {
-                if (node.isMesh) {
-                    const clonedMesh = new THREE.Mesh(
-                        node.geometry.clone(),
-                        node.material.clone()  // Clone material properly
-                    );
-                    clonedMesh.position.copy(node.position);
-                    clonedMesh.rotation.copy(node.rotation);
-                    clonedMesh.scale.copy(node.scale);
-                    inferenceCrate.add(clonedMesh);
-                }
+        // Initialize inference scene
+        function initInferenceScene() {
+            inferenceScene = new THREE.Scene();
+            inferenceScene.background = new THREE.Color(0xffffff);
+
+            inferenceCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+            inferenceCamera.position.set(0, 0, 0.3);
+            inferenceCamera.lookAt(0, 0, 0);
+
+            window.inferenceCamera = inferenceCamera; // for debugging
+
+            inferenceCanvas = document.getElementById('inference-image');
+            inferenceCanvas.width = 224;
+            inferenceCanvas.height = 224;
+
+            inferenceRenderer = new THREE.WebGLRenderer({
+                canvas: inferenceCanvas,
+                antialias: true,
+                preserveDrawingBuffer: true
             });
-            
-            inferenceScene.add(inferenceCrate);
-            console.log('✓ Inference crate created (no arrows)');
-            
-        }, undefined, (error) => {
-            console.error('Error loading GLB:', error);
-        });
+            inferenceRenderer.setSize(224, 224);
 
-        // ------------------ ANIMATION ------------------
-        function animate() {
-            requestAnimationFrame(animate);
-            
-            if (isSimulating) {
-                for (let i = 0; i < PHYSICS_STEPS_PER_FRAME; i++) { 
-                    stepPhysics(); 
-                    stepCount++; 
-                }
-                
-                frameCount++;
-                document.getElementById('step-count').textContent = stepCount;
-                
-                // Update actual quaternion display
-                const actualQuat = crateMesh.quaternion;
-                document.getElementById('actual-quat').textContent = 
-                    `[${actualQuat.x.toFixed(3)}, ${actualQuat.y.toFixed(3)}, ${actualQuat.z.toFixed(3)}, ${actualQuat.w.toFixed(3)}]`;
-                
-                // Render inference view and get prediction
-                if (frameCount % INFERENCE_INTERVAL === 0 && inferenceCrate) {
-                    inferenceCrate.position.copy(crateMesh.position);
-                    inferenceCrate.quaternion.copy(crateMesh.quaternion);
-                    inferenceCrate.scale.copy(crateMesh.scale);
-                    inferenceRenderer.render(inferenceScene, inferenceCamera);
-                    
-                    // Call prediction API
-                    runInference();
-                }
-                
-                // Reset conditions: too low or max steps
-                if (position.y < 0.05 || stepCount >= MAX_STEPS) {
-                    resetCrate();
-                }
+            inferenceScene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(2, 3, 2);
+            inferenceScene.add(light);
+        }
+
+        // Load GLB model
+        function loadModel() {
+            const loader = new GLTFLoader();
+            loader.load('static/models/isotopebox.glb', (gltf) => {
+                if (crateMesh) scene.remove(crateMesh);
+                crateMesh = gltf.scene;
+                window.crateMesh = crateMesh; // for debugging
+
+                const box = new THREE.Box3().setFromObject(crateMesh);
+                window.box = box;
+                console.log(box.min.y);
+
+                crateMesh.scale.set(0.1, 0.1, 0.1);
+                crateMesh.traverse(c => {
+                    if (c.isMesh) {
+                        c.castShadow = true;
+                        c.receiveShadow = true;
+                    }
+                });
+                scene.add(crateMesh);
+
+                // Create inference crate
+                inferenceCrate = new THREE.Group();
+                crateMesh.traverse(node => {
+                    if (node.isMesh) {
+                        const clone = new THREE.Mesh(node.geometry.clone(), node.material.clone());
+                        clone.position.copy(node.position);
+                        clone.rotation.copy(node.rotation);
+                        clone.scale.copy(node.scale);
+                        inferenceCrate.add(clone);
+                    }
+                });
+                scene.add(inferenceCrate);
+                const box1 = new THREE.Box3().setFromObject(crateMesh);
+                const helper = new THREE.Box3Helper(box1, 0xff0000); // red outline
+                scene.add(helper);
+            });
+        }
+
+        // Simulation callbacks
+        simulation.onStateUpdate = (state) => {
+            crateMesh.position.set(...state.position);
+            crateMesh.quaternion.set(...state.quaternion);
+
+            document.getElementById('pos-x-val').textContent = state.position[0].toFixed(2);
+            document.getElementById('pos-y-val').textContent = state.position[1].toFixed(2);
+            document.getElementById('pos-z-val').textContent = state.position[2].toFixed(2);
+            document.getElementById('step-count').textContent = state.step_count;
+            document.getElementById('actual-quat').textContent =
+                `[${state.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+
+            if (state.action) {
+                document.getElementById('rl-action').textContent =
+                    `[${state.action.map(v => v.toFixed(3)).join(', ')}]`;
             }
-            
+        };
+
+        simulation.onInferenceUpdate = (result) => {
+            document.getElementById('predicted-quat').textContent =
+                `[${result.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+        };
+
+        // Animation loop
+        async function animate() {
+            requestAnimationFrame(animate);
+
+            if (simulation.isRunning && inferenceCrate) {
+                await simulation.step(inferenceCanvas, INFERENCE_INTERVAL);
+
+                inferenceCrate.position.copy(crateMesh.position);
+                inferenceCrate.quaternion.copy(crateMesh.quaternion);
+                inferenceCrate.scale.copy(crateMesh.scale);
+
+                box1.position.copy(crateMesh.position);
+                box1.quaternion.copy(crateMesh.quaternion);
+                box1.scale.copy(crateMesh.scale);
+
+                inferenceRenderer.render(inferenceScene, inferenceCamera);
+            }
+
             controls.update();
             renderer.render(scene, camera);
         }
 
-        // ------------------ UI CONTROLS ------------------
+        // UI Controls
         document.getElementById('start-btn').addEventListener('click', () => {
-            isSimulating = true;
+            simulation.start();
             document.getElementById('start-btn').disabled = true;
             document.getElementById('stop-btn').disabled = false;
         });
 
         document.getElementById('stop-btn').addEventListener('click', () => {
-            isSimulating = false;
+            simulation.stop();
             document.getElementById('start-btn').disabled = false;
             document.getElementById('stop-btn').disabled = true;
         });
 
-        document.getElementById('reset-btn').addEventListener('click', resetCrate);
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            simulation.reset();
+        });
+
+        document.getElementById('rl-enabled-check').addEventListener('change', (e) => {
+            simulation.setRLEnabled(e.target.checked);
+        });
+
+        document.getElementById('wall-size-slider').addEventListener('input', (e) => {
+            const size = parseFloat(e.target.value);
+            document.getElementById('wall-size-val').textContent = size.toFixed(1);
+            simulation.updateWalls(size);
+        });
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -366,8 +360,28 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        resetCrate();
-        animate();
+        // Initialize
+        async function init() {
+            try {
+                updateLoadingStatus('Initializing scene...');
+                initScene();
+                initInferenceScene();
+                loadModel();
+
+                updateLoadingStatus('Loading ONNX models...');
+                await simulation.initialize();
+
+                updateLoadingStatus('Ready!');
+                hideLoadingOverlay();
+
+                animate();
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateLoadingStatus('Error: ' + error.message);
+            }
+        }
+
+        init();
     </script>
 </body>
 

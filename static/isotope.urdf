@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<robot name="custom_object">
+  <link name="body">
+    <!-- Link frame: Z axis points up through the top of the box -->
+    <visual>
+      <!-- No rotation, origin at center -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="models/isotopebox.obj" scale="0.1 0.1 0.1"/>
+      </geometry>
+    </visual>
+
+    <collision>
+      <!-- Stable primitive box collision -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.2 0.2 0.2"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <!-- Centered and aligned with link frame -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.00666" ixy="0.0" ixz="0.0" iyy="0.00666" iyz="0.0" izz="0.00666"/>
+    </inertial>
+  </link>
+</robot>

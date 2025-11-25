@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyTorch models (original, not needed for deployment)
+backend/pose_model_final.pt
+backend/isotope_upright_with_xyz_arrows.zip
+backend/isotope_upright_with_xyz_arrows/
+
+# Python scripts (not needed for deployment)
+backend/*.py
+backend/requirements.txt
+
+# Deprecated files
+deprecated/
+index.html.clean
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Keep ONNX models for deployment
+!static/models/*.onnx
