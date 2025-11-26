@@ -61,9 +61,11 @@ export class PhysicsSimulation {
         this.wallBodies = [];
 
         this.wallSize = size;
-        const halfSize = size / 1.0;
-        const height = 0.5;
-        const thickness = 0.05;
+        const halfSize = size / 2.0;
+        const height = 2.0;
+        const thickness = 1.0; // Very thick walls to prevent tunneling
+
+        console.log(`Creating walls: size=${size}, halfSize=${halfSize}, height=${height}, thickness=${thickness}`);
 
         // North wall (Z-)
         const northShape = new CANNON.Box(new CANNON.Vec3(halfSize + thickness, height, thickness));
@@ -72,6 +74,7 @@ export class PhysicsSimulation {
         northBody.position.set(0, height, -halfSize - thickness);
         this.world.addBody(northBody);
         this.wallBodies.push(northBody);
+        console.log(`North wall at Z=${-halfSize - thickness}`);
 
         // South wall (Z+)
         const southShape = new CANNON.Box(new CANNON.Vec3(halfSize + thickness, height, thickness));
@@ -80,6 +83,7 @@ export class PhysicsSimulation {
         southBody.position.set(0, height, halfSize + thickness);
         this.world.addBody(southBody);
         this.wallBodies.push(southBody);
+        console.log(`South wall at Z=${halfSize + thickness}`);
 
         // East wall (X+)
         const eastShape = new CANNON.Box(new CANNON.Vec3(thickness, height, halfSize));
@@ -88,6 +92,7 @@ export class PhysicsSimulation {
         eastBody.position.set(halfSize + thickness, height, 0);
         this.world.addBody(eastBody);
         this.wallBodies.push(eastBody);
+        console.log(`East wall at X=${halfSize + thickness}`);
 
         // West wall (X-)
         const westShape = new CANNON.Box(new CANNON.Vec3(thickness, height, halfSize));
@@ -96,6 +101,8 @@ export class PhysicsSimulation {
         westBody.position.set(-halfSize - thickness, height, 0);
         this.world.addBody(westBody);
         this.wallBodies.push(westBody);
+        console.log(`West wall at X=${-halfSize - thickness}`);
+        console.log(`Total walls created: ${this.wallBodies.length}`);
     }
 
     /**
@@ -270,6 +277,13 @@ export class PhysicsSimulation {
         if (quaternion) {
             this.boxBody.quaternion.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
         }
+    }
+
+    /**
+     * Update wall size
+     */
+    updateWalls(size) {
+        this.createWalls(size);
     }
 
     /**
