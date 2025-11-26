@@ -227,6 +227,7 @@
                 new THREE.MeshStandardMaterial({ color: 0x667eea })
             );
             crateMesh.castShadow = true;
+
             scene.add(crateMesh);
 
             // Initialize raycaster for mouse interaction
@@ -381,6 +382,7 @@
                         console.log(`  Mesh part: ${pos.count} vertices, ${geo.index ? geo.index.count / 3 : pos.count / 3} triangles`);
                     }
                 });
+                crateMesh.position.set(0, 1.5, 0);
 
                 if (allVertices.length > 0) {
                     console.log(`Total merged mesh: ${allVertices.length / 3} vertices, ${allIndices.length / 3} triangles`);

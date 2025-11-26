@@ -142,7 +142,7 @@ export class PhysicsSimulation {
         this.boxBody = new CANNON.Body({
             mass: 1.0, // 1kg mass
             shape: shape,
-            position: new CANNON.Vec3(0, 0.5, 0), // Start in center, slightly elevated
+            position: new CANNON.Vec3(0, 1.5, 0), // Start in center, slightly elevated
             quaternion: randomQuat, // Random orientation
             linearDamping: 0.01,
             angularDamping: 0.01

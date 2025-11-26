@@ -139,7 +139,7 @@ export class SimulationController {
         if (!this.physics.predictedQuaternion) {
             this.physics.setAction([0, 0, 0]);
             return;
-        }
+        } AC
 
         try {
             // Get current angular velocity
