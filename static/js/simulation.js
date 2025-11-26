@@ -190,6 +190,13 @@ export class SimulationController {
     }
 
     /**
+     * Update box size
+     */
+    setBoxSize(x, y, z) {
+        this.physics.setBoxSize(x, y, z);
+    }
+
+    /**
      * Teleport box to position
      */
     teleportBox(position, quaternion = null) {

@@ -16,6 +16,7 @@ export class PhysicsSimulation {
         this.wallSize = 1.0;
         this.rlEnabled = false;
         this.predictedQuaternion = null;
+        this.boxSize = new CANNON.Vec3(0.1, 0.1, 0.1); // Default half-extents
     }
 
     /**
@@ -101,12 +102,12 @@ export class PhysicsSimulation {
      */
     reset() {
         // Remove existing box if any
-        if (this.boxBody) {
+        if (this.boxBody && this.world) {
             this.world.removeBody(this.boxBody);
         }
 
-        // Create box shape (0.2 x 0.2 x 0.2 to match the visual mesh)
-        const boxShape = new CANNON.Box(new CANNON.Vec3(0.1, 0.1, 0.1));
+        // Create box shape using stored size
+        const boxShape = new CANNON.Box(this.boxSize);
 
         // Generate random orientation for ragdoll effect
         const randomAxis = new CANNON.Vec3(
@@ -134,7 +135,9 @@ export class PhysicsSimulation {
         this.boxBody.sleepState = CANNON.Body.AWAKE;
 
         // Add to world
-        this.world.addBody(this.boxBody);
+        if (this.world) {
+            this.world.addBody(this.boxBody);
+        }
 
         // Reset state
         this.stepCount = 0;
@@ -152,10 +155,11 @@ export class PhysicsSimulation {
 
         for (let i = 0; i < numSteps; i++) {
             // Apply torque (scaled like PyBullet: action * 0.1)
+            // Apply torque (scaled up for better control)
             const torque = new CANNON.Vec3(
-                this.currentAction.x * 0.1,
-                this.currentAction.y * 0.1,
-                this.currentAction.z * 0.1
+                this.currentAction.x * 10.0,
+                this.currentAction.y * 10.0,
+                this.currentAction.z * 10.0
             );
 
             // Apply torque in local frame (LINK_FRAME equivalent)
@@ -264,6 +268,14 @@ export class PhysicsSimulation {
         this.createWalls(size);
     }
 
+    /**
+     * Set box size (half-extents)
+     */
+    setBoxSize(x, y, z) {
+        this.boxSize.set(x, y, z);
+        this.reset();
+    }
+
     // ============== MOUSE INTERACTION ==============
 
     /**
@@ -301,6 +313,13 @@ export class PhysicsSimulation {
 
         this.world.addConstraint(this.mouseConstraint);
 
+        // Limit force to prevent "explosive" movement
+        this.mouseConstraint.collideConnected = false;
+
+        // Increase damping while dragging for stability
+        this.boxBody.linearDamping = 0.5;
+        this.boxBody.angularDamping = 0.5;
+
         // Wake up the body
         this.boxBody.wakeUp();
     }
@@ -323,7 +342,14 @@ export class PhysicsSimulation {
     releaseBox() {
         if (this.mouseConstraint) {
             this.world.removeConstraint(this.mouseConstraint);
+            this.world.removeConstraint(this.mouseConstraint);
             this.mouseConstraint = null;
+        }
+
+        // Restore original damping
+        if (this.boxBody) {
+            this.boxBody.linearDamping = 0.01;
+            this.boxBody.angularDamping = 0.01;
         }
     }
 

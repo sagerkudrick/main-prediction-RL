@@ -10,9 +10,6 @@
     <!-- ONNX Runtime Web -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
 
-    <!-- Cannon.js Physics -->
-    <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
-
     <!-- Three.js Import Map -->
     <script type="importmap">
     {
@@ -92,6 +89,28 @@
         <canvas id="inference-image"></canvas>
     </div>
 
+    <!-- Error Handler -->
+    <script>
+        window.onerror = function (msg, url, line, col, error) {
+            const status = document.getElementById('loading-status');
+            if (status) {
+                status.textContent = 'Error: ' + msg;
+                status.style.color = 'red';
+            }
+            console.error('Global error:', msg, error);
+            return false;
+        };
+
+        window.addEventListener('unhandledrejection', function (event) {
+            const status = document.getElementById('loading-status');
+            if (status) {
+                status.textContent = 'Error: ' + event.reason;
+                status.style.color = 'red';
+            }
+            console.error('Unhandled rejection:', event.reason);
+        });
+    </script>
+
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -105,19 +124,25 @@
         let scene, camera, renderer, controls;
         let crateMesh, inferenceCrate, wallGroup;
         let inferenceCanvas, inferenceRenderer, inferenceScene, inferenceCamera;
+        let raycaster, mouse;
+        let isDragging = false;
 
         const simulation = new SimulationController();
 
         // Loading overlay functions
         function updateLoadingStatus(message) {
-            document.getElementById('loading-status').textContent = message;
+            const el = document.getElementById('loading-status');
+            if (el) el.textContent = message;
         }
 
         function hideLoadingOverlay() {
-            document.getElementById('loading-overlay').style.opacity = '0';
-            setTimeout(() => {
-                document.getElementById('loading-overlay').style.display = 'none';
-            }, 300);
+            const el = document.getElementById('loading-overlay');
+            if (el) {
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.style.display = 'none';
+                }, 300);
+            }
         }
 
         function captureInferenceImage(renderer, width = 256, height = 256) {
@@ -213,6 +238,10 @@
             );
             crateMesh.castShadow = true;
             scene.add(crateMesh);
+
+            // Initialize raycaster for mouse interaction
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
         }
 
         // Initialize inference scene
@@ -243,6 +272,65 @@
             inferenceScene.add(light);
         }
 
+        // Create visual walls matching physics
+        function createWalls(size) {
+            // Remove existing walls
+            if (wallGroup) {
+                scene.remove(wallGroup);
+            }
+
+            wallGroup = new THREE.Group();
+            const halfSize = size / 1.0;
+            const height = 0.5;
+            const thickness = 0.05;
+
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0x667eea,
+                transparent: true,
+                opacity: 0.3
+            });
+
+            // North wall (Z-)
+            const northWall = new THREE.Mesh(
+                new THREE.BoxGeometry(halfSize * 2 + thickness * 2, height * 2, thickness * 2),
+                wallMaterial
+            );
+            northWall.position.set(0, height, -halfSize - thickness);
+            wallGroup.add(northWall);
+
+            // South wall (Z+)
+            const southWall = new THREE.Mesh(
+                new THREE.BoxGeometry(halfSize * 2 + thickness * 2, height * 2, thickness * 2),
+                wallMaterial
+            );
+            southWall.position.set(0, height, halfSize + thickness);
+            wallGroup.add(southWall);
+
+            // East wall (X+)
+            const eastWall = new THREE.Mesh(
+                new THREE.BoxGeometry(thickness * 2, height * 2, halfSize * 2),
+                wallMaterial
+            );
+            eastWall.position.set(halfSize + thickness, height, 0);
+            wallGroup.add(eastWall);
+
+            // West wall (X-)
+            const westWall = new THREE.Mesh(
+                new THREE.BoxGeometry(thickness * 2, height * 2, halfSize * 2),
+                wallMaterial
+            );
+            westWall.position.set(-halfSize - thickness, height, 0);
+            wallGroup.add(westWall);
+
+            scene.add(wallGroup);
+        }
+
+        // Update walls when size changes
+        function updateWalls(size) {
+            createWalls(size);
+            simulation.updateWalls(size);
+        }
+
         // Load GLB model
         function loadModel() {
             const loader = new GLTFLoader();
@@ -252,10 +340,15 @@
                 window.crateMesh = crateMesh; // for debugging
 
                 const box = new THREE.Box3().setFromObject(crateMesh);
-                window.box = box;
-                console.log(box.min.y);
+                const size = new THREE.Vector3();
+                box.getSize(size);
 
-                crateMesh.scale.set(0.1, 0.1, 0.1);
+                // Update physics box size (half-extents)
+                simulation.setBoxSize(size.x / 2, size.y / 2, size.z / 2);
+
+                console.log(`Model loaded. Size: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`);
+
+                crateMesh.scale.set(1.0, 1.0, 1.0);
                 crateMesh.traverse(c => {
                     if (c.isMesh) {
                         c.castShadow = true;
@@ -275,10 +368,7 @@
                         inferenceCrate.add(clone);
                     }
                 });
-                scene.add(inferenceCrate);
-                const box1 = new THREE.Box3().setFromObject(crateMesh);
-                const helper = new THREE.Box3Helper(box1, 0xff0000); // red outline
-                scene.add(helper);
+                inferenceScene.add(inferenceCrate);
             });
         }
 
@@ -312,13 +402,9 @@
             if (simulation.isRunning && inferenceCrate) {
                 await simulation.step(inferenceCanvas, INFERENCE_INTERVAL);
 
-                inferenceCrate.position.copy(crateMesh.position);
+                inferenceCrate.position.set(0, 0, 0);
                 inferenceCrate.quaternion.copy(crateMesh.quaternion);
                 inferenceCrate.scale.copy(crateMesh.scale);
-
-                box1.position.copy(crateMesh.position);
-                box1.quaternion.copy(crateMesh.quaternion);
-                box1.scale.copy(crateMesh.scale);
 
                 inferenceRenderer.render(inferenceScene, inferenceCamera);
             }
@@ -351,7 +437,7 @@
         document.getElementById('wall-size-slider').addEventListener('input', (e) => {
             const size = parseFloat(e.target.value);
             document.getElementById('wall-size-val').textContent = size.toFixed(1);
-            simulation.updateWalls(size);
+            updateWalls(size);
         });
 
         window.addEventListener('resize', () => {
@@ -360,13 +446,74 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
+        // Mouse interaction for ragdoll physics
+        function getMouseWorldPoint(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (crateMesh) {
+                const distance = camera.position.distanceTo(crateMesh.position);
+                const worldPoint = new THREE.Vector3();
+                worldPoint.copy(raycaster.ray.origin).add(
+                    raycaster.ray.direction.clone().multiplyScalar(distance)
+                );
+                return [worldPoint.x, worldPoint.y, worldPoint.z];
+            }
+            return null;
+        }
+
+        function initInput() {
+            renderer.domElement.addEventListener('mousedown', (event) => {
+                if (!simulation.isRunning) return;
+
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(crateMesh, true);
+
+                if (intersects.length > 0) {
+                    isDragging = true;
+                    controls.enabled = false;
+                    const point = intersects[0].point;
+                    simulation.grabBox([point.x, point.y, point.z]);
+                }
+            });
+
+            renderer.domElement.addEventListener('mousemove', (event) => {
+                if (!isDragging) return;
+                const worldPoint = getMouseWorldPoint(event);
+                if (worldPoint) {
+                    simulation.moveGrabbed(worldPoint);
+                }
+            });
+
+            renderer.domElement.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    controls.enabled = true;
+                    simulation.releaseBox();
+                }
+            });
+
+            renderer.domElement.addEventListener('mouseleave', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    controls.enabled = true;
+                    simulation.releaseBox();
+                }
+            });
+        }
+
         // Initialize
         async function init() {
             try {
                 updateLoadingStatus('Initializing scene...');
                 initScene();
                 initInferenceScene();
+                initInput(); // Initialize input listeners after renderer is ready
                 loadModel();
+                createWalls(1.0); // Initialize walls with default size
 
                 updateLoadingStatus('Loading ONNX models...');
                 await simulation.initialize();
