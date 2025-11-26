@@ -144,13 +144,14 @@ export class PhysicsSimulation {
             shape: shape,
             position: new CANNON.Vec3(0, 1.5, 0), // Start in center, slightly elevated
             quaternion: randomQuat, // Random orientation
-            linearDamping: 0.01,
-            angularDamping: 0.01
+            linearDamping: 0.1,  // Increased from 0.01 for better stability
+            angularDamping: 0.1  // Increased from 0.01 for better stability
         });
 
-        // Disable sleeping to prevent "freezing"
-        this.boxBody.allowSleep = false;
-        this.boxBody.sleepState = CANNON.Body.AWAKE;
+        // Allow sleeping to prevent jitter when at rest
+        this.boxBody.allowSleep = true;
+        this.boxBody.sleepSpeedLimit = 0.1;  // Speed below which body can sleep
+        this.boxBody.sleepTimeLimit = 0.5;   // Time body must be slow before sleeping
 
         // Add to world
         if (this.world) {
@@ -383,8 +384,8 @@ export class PhysicsSimulation {
 
         // Restore original damping
         if (this.boxBody) {
-            this.boxBody.linearDamping = 0.01;
-            this.boxBody.angularDamping = 0.01;
+            this.boxBody.linearDamping = 0.1;
+            this.boxBody.angularDamping = 0.1;
         }
     }
 
