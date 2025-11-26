@@ -112,6 +112,7 @@ export class InferenceManager {
             throw new Error('Models not loaded yet');
         }
 
+
         // Use mock data if models aren't loaded or canvas is missing
         if (this.useMockData || !canvas) {
             return {
@@ -159,6 +160,7 @@ export class InferenceManager {
             };
         }
     }
+
     /**
      * Predict RL action from observation
      * @param {Array} observation - 16-element observation array
