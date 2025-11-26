@@ -17,6 +17,7 @@ export class PhysicsSimulation {
         this.rlEnabled = false;
         this.predictedQuaternion = null;
         this.boxSize = new CANNON.Vec3(0.1, 0.1, 0.1); // Default half-extents
+        this.meshData = null; // Stores { vertices, faces } for ConvexPolyhedron
     }
 
     /**
@@ -106,8 +107,18 @@ export class PhysicsSimulation {
             this.world.removeBody(this.boxBody);
         }
 
-        // Create box shape using stored size
-        const boxShape = new CANNON.Box(this.boxSize);
+        let shape;
+        if (this.meshData) {
+            // Create Trimesh from mesh data (supports concave geometry)
+            const vertices = this.meshData.vertices;
+            const indices = this.meshData.indices;
+
+            shape = new CANNON.Trimesh(vertices, indices);
+            console.log(`Created Trimesh with ${vertices.length / 3} vertices and ${indices.length / 3} triangles`);
+        } else {
+            // Fallback to box
+            shape = new CANNON.Box(this.boxSize);
+        }
 
         // Generate random orientation for ragdoll effect
         const randomAxis = new CANNON.Vec3(
@@ -123,7 +134,7 @@ export class PhysicsSimulation {
         // Create box body with mass
         this.boxBody = new CANNON.Body({
             mass: 1.0, // 1kg mass
-            shape: boxShape,
+            shape: shape,
             position: new CANNON.Vec3(0, 0.5, 0), // Start in center, slightly elevated
             quaternion: randomQuat, // Random orientation
             linearDamping: 0.01,
@@ -273,6 +284,16 @@ export class PhysicsSimulation {
      */
     setBoxSize(x, y, z) {
         this.boxSize.set(x, y, z);
+        this.reset();
+    }
+
+    /**
+     * Set mesh shape from vertices and indices
+     * @param {Array} vertices - Flat array of vertices [x, y, z, ...]
+     * @param {Array} indices - Flat array of indices [i, j, k, ...]
+     */
+    setMeshShape(vertices, indices) {
+        this.meshData = { vertices, indices };
         this.reset();
     }
 

@@ -197,6 +197,13 @@ export class SimulationController {
     }
 
     /**
+     * Set mesh shape
+     */
+    setMeshShape(vertices, indices) {
+        this.physics.setMeshShape(vertices, indices);
+    }
+
+    /**
      * Teleport box to position
      */
     teleportBox(position, quaternion = null) {

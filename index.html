@@ -126,6 +126,7 @@
         let inferenceCanvas, inferenceRenderer, inferenceScene, inferenceCamera;
         let raycaster, mouse;
         let isDragging = false;
+        let debugMesh;
 
         const simulation = new SimulationController();
 
@@ -144,57 +145,6 @@
                 }, 300);
             }
         }
-
-        function captureInferenceImage(renderer, width = 256, height = 256) {
-            const gl = renderer.getContext();
-            const pixels = new Uint8Array(width * height * 4); // RGBA
-            gl.readPixels(
-                0, 0, width, height,
-                gl.RGBA, gl.UNSIGNED_BYTE,
-                pixels
-            );
-
-            // Flip Y-axis because WebGL origin is bottom-left
-            const flipped = new Uint8Array(width * height * 4);
-            for (let y = 0; y < height; y++) {
-                const srcOffset = y * width * 4;
-                const destOffset = (height - 1 - y) * width * 4;
-                flipped.set(pixels.subarray(srcOffset, srcOffset + width * 4), destOffset);
-            }
-
-            return flipped;
-        }
-
-        function pixelsToTensor(pixels, width = 256, height = 256) {
-            const data = new Float32Array(3 * width * height);
-
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    const i = (y * width + x) * 4;
-                    // Normalize to 0..1 and separate channels
-                    data[y * width + x] = pixels[i] / 255;               // R
-                    data[width * height + y * width + x] = pixels[i + 1] / 255; // G
-                    data[2 * width * height + y * width + x] = pixels[i + 2] / 255; // B
-                }
-            }
-
-            return new ort.Tensor('float32', data, [1, 3, height, width]);
-        }
-
-        async function runInference(session, renderer) {
-            // 1. Capture the image
-            const pixels = captureInferenceImage(renderer);
-
-            // 2. Convert to tensor
-            const inputTensor = pixelsToTensor(pixels);
-
-            // 3. Run ONNX model
-            const feeds = { input: inputTensor }; // adjust key name to your model
-            const output = await session.run(feeds);
-
-            return output;
-        }
-
 
         // Initialize Three.js scene
         function initScene() {
@@ -339,14 +289,85 @@
                 crateMesh = gltf.scene;
                 window.crateMesh = crateMesh; // for debugging
 
+                // 1. Calculate bounding box
                 const box = new THREE.Box3().setFromObject(crateMesh);
                 const size = new THREE.Vector3();
                 box.getSize(size);
+                const center = new THREE.Vector3();
+                box.getCenter(center);
 
-                // Update physics box size (half-extents)
-                simulation.setBoxSize(size.x / 2, size.y / 2, size.z / 2);
+                // 2. Center the geometry
+                crateMesh.traverse(node => {
+                    if (node.isMesh) {
+                        node.geometry.translate(-center.x, -center.y, -center.z);
+                    }
+                });
+
+                // Update world matrix after centering
+                crateMesh.updateMatrixWorld(true);
 
                 console.log(`Model loaded. Size: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`);
+
+                // 3. Extract and merge ALL geometry for physics
+                const allVertices = [];
+                const allIndices = [];
+                let vertexOffset = 0;
+
+                crateMesh.traverse(node => {
+                    if (node.isMesh) {
+                        const geo = node.geometry;
+                        const pos = geo.attributes.position;
+
+                        // Add vertices (already centered)
+                        for (let i = 0; i < pos.count; i++) {
+                            allVertices.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+                        }
+
+                        // Add indices with offset
+                        if (geo.index) {
+                            const indices = geo.index.array;
+                            for (let i = 0; i < indices.length; i++) {
+                                allIndices.push(indices[i] + vertexOffset);
+                            }
+                        } else {
+                            // Non-indexed geometry
+                            for (let i = 0; i < pos.count; i++) {
+                                allIndices.push(i + vertexOffset);
+                            }
+                        }
+
+                        vertexOffset += pos.count;
+
+                        console.log(`  Mesh part: ${pos.count} vertices, ${geo.index ? geo.index.count / 3 : pos.count / 3} triangles`);
+                    }
+                });
+
+                if (allVertices.length > 0) {
+                    console.log(`Total merged mesh: ${allVertices.length / 3} vertices, ${allIndices.length / 3} triangles`);
+                    simulation.setMeshShape(allVertices, allIndices);
+
+                    // Create merged debug mesh
+                    if (debugMesh) scene.remove(debugMesh);
+                    const mergedGeo = new THREE.BufferGeometry();
+                    mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(allVertices, 3));
+                    mergedGeo.setIndex(allIndices);
+                    debugMesh = new THREE.Mesh(
+                        mergedGeo,
+                        new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+                    );
+                    scene.add(debugMesh);
+                } else {
+                    console.warn('No mesh found for physics, falling back to box');
+                    simulation.setBoxSize(size.x / 2, size.y / 2, size.z / 2);
+
+                    // Fallback debug mesh
+                    if (debugMesh) scene.remove(debugMesh);
+                    debugMesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(size.x, size.y, size.z),
+                        new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+                    );
+                    scene.add(debugMesh);
+                }
 
                 crateMesh.scale.set(1.0, 1.0, 1.0);
                 crateMesh.traverse(c => {
@@ -357,7 +378,7 @@
                 });
                 scene.add(crateMesh);
 
-                // Create inference crate
+                // 4. Create inference crate
                 inferenceCrate = new THREE.Group();
                 crateMesh.traverse(node => {
                     if (node.isMesh) {
@@ -376,6 +397,11 @@
         simulation.onStateUpdate = (state) => {
             crateMesh.position.set(...state.position);
             crateMesh.quaternion.set(...state.quaternion);
+
+            if (debugMesh) {
+                debugMesh.position.copy(crateMesh.position);
+                debugMesh.quaternion.copy(crateMesh.quaternion);
+            }
 
             document.getElementById('pos-x-val').textContent = state.position[0].toFixed(2);
             document.getElementById('pos-y-val').textContent = state.position[1].toFixed(2);
@@ -511,9 +537,9 @@
                 updateLoadingStatus('Initializing scene...');
                 initScene();
                 initInferenceScene();
-                initInput(); // Initialize input listeners after renderer is ready
+                initInput();
                 loadModel();
-                createWalls(1.0); // Initialize walls with default size
+                createWalls(1.0);
 
                 updateLoadingStatus('Loading ONNX models...');
                 await simulation.initialize();
