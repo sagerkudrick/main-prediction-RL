@@ -94,6 +94,10 @@
             <label>Quat Angle Distance (°)</label>
             <div class="value" id="quat-loss">-</div>
         </div>
+        <div class="diagnostic-item">
+            <label>Quat Cosine Loss</label>
+            <div class="value" id="cos-loss">-</div>
+        </div>
 
     </div>
 
@@ -437,6 +441,15 @@
             crateMesh.position.set(...state.position);
             crateMesh.quaternion.set(...state.quaternion);
 
+            simulation.lastQuaternion = state.quaternion;
+
+            document.getElementById('actual-quat').textContent =
+                `[${state.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+
+            const euler = quatToEulerDegrees(state.quaternion);
+            document.getElementById('actual-euler').textContent =
+                `[${euler.map(v => v.toFixed(1)).join(', ')}]`;
+
             if (debugMesh) {
                 debugMesh.position.copy(crateMesh.position);
                 debugMesh.quaternion.copy(crateMesh.quaternion);
@@ -460,25 +473,34 @@
             }
         };
 
+
+
         simulation.onInferenceUpdate = (result) => {
             const predQuat = result.quaternion;
+
+            // Update predicted quat display
             document.getElementById('predicted-quat').textContent =
                 `[${predQuat.map(v => v.toFixed(3)).join(', ')}]`;
 
-            // predicted euler
             const predEuler = quatToEulerDegrees(predQuat);
             document.getElementById('pred-euler').textContent =
                 `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
 
-            // get actual quat from last simulation state
-            const actualQuat = simulation.lastQuaternion; // store this in onStateUpdate
-            simulation.lastQuaternion = state.quaternion;
+            // Get actual quat from simulation loop
+            const actualQuat = simulation.lastQuaternion;
 
-            if (actualQuat) {
-                const angleDist = quaternionAngularDistance(predQuat, actualQuat);
-                document.getElementById('quat-loss').textContent =
-                    angleDist.toFixed(2);
+            if (!actualQuat) {
+                console.warn("Actual quaternion not set yet.");
+                return;
             }
+
+            // Angular distance (°)
+            const angle = quaternionAngularDistance(predQuat, actualQuat);
+            document.getElementById("quat-loss").textContent = angle.toFixed(2);
+
+            // Cosine loss
+            const cos = quatCosineLoss(predQuat, actualQuat);
+            document.getElementById("cos-loss").textContent = cos.toFixed(6);
         };
 
         // Animation loop
@@ -498,6 +520,31 @@
             controls.update();
             renderer.render(scene, camera);
         }
+
+        function quatCosineLoss(pred, actual) {
+            // pred = [x,y,z,w]
+            // actual = [x,y,z,w]
+
+            // Normalize (your model normalizes, but safe)
+            const np = normQuat(pred);
+            const na = normQuat(actual);
+
+            // dot product
+            const dot =
+                np[0] * na[0] +
+                np[1] * na[1] +
+                np[2] * na[2] +
+                np[3] * na[3];
+
+            // cosine loss from training
+            return 1.0 - Math.abs(dot);
+        }
+
+        function normQuat(q) {
+            const n = Math.sqrt(q[0] ** 2 + q[1] ** 2 + q[2] ** 2 + q[3] ** 2) + 1e-8;
+            return [q[0] / n, q[1] / n, q[2] / n, q[3] / n,];
+        }
+
 
         // UI Controls
         document.getElementById('start-btn').addEventListener('click', () => {
