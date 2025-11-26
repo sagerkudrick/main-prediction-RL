@@ -81,6 +81,20 @@
             <label>RL Action</label>
             <div class="value" id="rl-action">-</div>
         </div>
+
+        <div class="diagnostic-item">
+            <label>Pred Euler (XYZ°)</label>
+            <div class="value" id="pred-euler">-</div>
+        </div>
+        <div class="diagnostic-item">
+            <label>Actual Euler (XYZ°)</label>
+            <div class="value" id="actual-euler">-</div>
+        </div>
+        <div class="diagnostic-item">
+            <label>Quat Angle Distance (°)</label>
+            <div class="value" id="quat-loss">-</div>
+        </div>
+
     </div>
 
     <!-- Inference Preview -->
@@ -146,6 +160,28 @@
             }
         }
 
+        function quatToEulerDegrees(q) {
+            const quat = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
+            const e = new THREE.Euler().setFromQuaternion(quat, 'XYZ');
+            return [
+                THREE.MathUtils.radToDeg(e.x),
+                THREE.MathUtils.radToDeg(e.y),
+                THREE.MathUtils.radToDeg(e.z)
+            ];
+        }
+
+        function quaternionAngularDistance(q1, q2) {
+            const dot =
+                q1[0] * q2[0] +
+                q1[1] * q2[1] +
+                q1[2] * q2[2] +
+                q1[3] * q2[3];
+
+            const d = Math.min(1.0, Math.abs(dot));
+            return THREE.MathUtils.radToDeg(2 * Math.acos(d));
+        }
+
+
         // Initialize Three.js scene
         function initScene() {
             scene = new THREE.Scene();
@@ -200,7 +236,7 @@
             inferenceScene.background = new THREE.Color(0xffffff);
 
             inferenceCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-            inferenceCamera.position.set(0, 0, 0.3);
+            inferenceCamera.position.set(0, 0, 3);
             inferenceCamera.lookAt(0, 0, 0);
 
             window.inferenceCamera = inferenceCamera; // for debugging
@@ -369,6 +405,9 @@
                     scene.add(debugMesh);
                 }
 
+                const axes = new THREE.AxesHelper(5);
+                crateMesh.add(axes);
+
                 crateMesh.scale.set(1.0, 1.0, 1.0);
                 crateMesh.traverse(c => {
                     if (c.isMesh) {
@@ -403,6 +442,11 @@
                 debugMesh.quaternion.copy(crateMesh.quaternion);
             }
 
+            const actualEuler = quatToEulerDegrees(state.quaternion);
+            document.getElementById('actual-euler').textContent =
+                `[${actualEuler.map(v => v.toFixed(1)).join(', ')}]`;
+
+
             document.getElementById('pos-x-val').textContent = state.position[0].toFixed(2);
             document.getElementById('pos-y-val').textContent = state.position[1].toFixed(2);
             document.getElementById('pos-z-val').textContent = state.position[2].toFixed(2);
@@ -417,8 +461,24 @@
         };
 
         simulation.onInferenceUpdate = (result) => {
+            const predQuat = result.quaternion;
             document.getElementById('predicted-quat').textContent =
-                `[${result.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+                `[${predQuat.map(v => v.toFixed(3)).join(', ')}]`;
+
+            // predicted euler
+            const predEuler = quatToEulerDegrees(predQuat);
+            document.getElementById('pred-euler').textContent =
+                `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
+
+            // get actual quat from last simulation state
+            const actualQuat = simulation.lastQuaternion; // store this in onStateUpdate
+            simulation.lastQuaternion = state.quaternion;
+
+            if (actualQuat) {
+                const angleDist = quaternionAngularDistance(predQuat, actualQuat);
+                document.getElementById('quat-loss').textContent =
+                    angleDist.toFixed(2);
+            }
         };
 
         // Animation loop
