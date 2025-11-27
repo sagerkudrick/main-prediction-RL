@@ -44,7 +44,7 @@ export class InferenceManager {
             for (const provider of providers) {
                 try {
                     console.log(`    Trying ${provider} backend...`);
-                    this.poseSession = await ort.InferenceSession.create('resnet18_web.onnx', {
+                    this.poseSession = await ort.InferenceSession.create('static/models/model.onnx', {
                         executionProviders: [provider],
                         graphOptimizationLevel: 'basic'
                     });

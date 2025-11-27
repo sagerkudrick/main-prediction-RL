@@ -136,6 +136,7 @@
         import { PhysicsSimulation } from './static/js/physics.js';
         import { InferenceManager } from './static/js/inference.js';
         import { SimulationController } from './static/js/simulation.js';
+        import { addLightHelper } from './static/js/light-helpers.js';
 
         const INFERENCE_INTERVAL = 15;
 
@@ -205,11 +206,12 @@
             controls.target.set(0, 0.3, 0);
 
             // Lights
-            scene.add(new THREE.AmbientLight(0x404040, 2));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 3);
-            dirLight.position.set(5, 10, 5);
-            dirLight.castShadow = true;
-            scene.add(dirLight);
+            // scene.add(new THREE.AmbientLight(0x404040, 2));
+            // const dirLight = new THREE.DirectionalLight(0xffffff, 3);
+            // dirLight.position.set(5, 10, 5);
+            // dirLight.castShadow = true;
+            // scene.add(dirLight);
+            // addLightHelper(dirLight, 2, 0xffff00, 0.2);
 
             // Ground
             const ground = new THREE.Mesh(
@@ -218,6 +220,7 @@
             );
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = false;
+            ground.castShadow = false;
             scene.add(ground);
             scene.add(new THREE.GridHelper(20, 20, 0x667eea, 0x3a3a4e));
 
@@ -261,10 +264,10 @@
             // const light = new THREE.DirectionalLight(0xffffff, 1);
             // light.position.set(2, 3, 2);
             // inferenceScene.add(light);
-
-
+            let inferenceTopLight;
+            let inferenceBottomLight;
             // Convert W to Three.js intensity roughly: 1 W ≈ 0.5-1 intensity depending on scene scale
-            const intensity = 287.5 / 100; // scaling factor for Three.js, adjust visually
+            const intensity = 25; // scaling factor for Three.js, adjust visually
 
             // Center of your box
             const centerX = (-1.02 + 2.4) / 2; // ~0.69
@@ -278,18 +281,31 @@
 
             // Top light
             const topLight = new THREE.PointLight(0xffffff, intensity, Math.max(sizeX, sizeY, sizeZ) * 2);
-            topLight.position.set(centerX, 3.74 + 0.2, centerZ); // slightly above top
+            topLight.position.set(centerX + 2, 3.2, centerZ); // slightly above top
             topLight.castShadow = true;
-            inferenceScene.add(topLight);
+
+            inferenceTopLight = topLight.clone();
+            scene.add(topLight);
 
             // Bottom light
             const bottomLight = new THREE.PointLight(0xffffff, intensity * 0.8, Math.max(sizeX, sizeY, sizeZ) * 2);
-            bottomLight.position.set(centerX, 3.06 - 0.2, centerZ); // slightly below bottom
+            bottomLight.position.set(centerX - 1.5, -2, centerZ + 1); // slightly below bottom
             bottomLight.castShadow = true;
-            inferenceScene.add(bottomLight);
+            inferenceBottomLight = bottomLight.clone();
+            scene.add(bottomLight);
 
             window.topLight = topLight
             window.bottomLight = bottomLight
+
+            addLightHelper(topLight, 0.5, 0xffff00, 0.1);
+            addLightHelper(bottomLight, 0.5, 0xff00ff, 0.1);
+
+
+            inferenceTopLight.castShadow = true;
+            inferenceBottomLight.castShadow = true;
+
+            inferenceScene.add(inferenceTopLight);
+            inferenceScene.add(inferenceBottomLight);
 
         }
 
@@ -366,7 +382,6 @@
                 box.getSize(size);
                 const center = new THREE.Vector3();
                 box.getCenter(center);
-                setupInferenceLights(crateMesh);
 
                 // 2. Center the geometry
                 crateMesh.traverse(node => {
@@ -374,7 +389,7 @@
                         node.geometry.translate(-center.x, -center.y, -center.z);
                     }
                 });
-
+                crateMesh.rotation.y = Math.PI;
                 // Update world matrix after centering
                 crateMesh.updateMatrixWorld(true);
 
@@ -572,46 +587,6 @@
             // cosine loss from training
             return 1.0 - Math.abs(dot);
         }
-
-        function setupInferenceLights(crateMesh) {
-            // Compute bounding box in world coordinates
-            const box = new THREE.Box3().setFromObject(crateMesh);
-            const size = new THREE.Vector3();
-            const center = new THREE.Vector3();
-            box.getSize(size);
-            box.getCenter(center);
-
-            // Optional: scale intensity based on size
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const intensity = maxDim * 2; // adjust visually
-
-            // Top light (above green/Y axis)
-            const topLight = new THREE.PointLight(0xffffff, 1.5, maxDim * 4);
-            topLight.position.set(center.x, center.y + size.y / 2 + 0.2, center.z);
-            topLight.castShadow = true;
-            inferenceScene.add(topLight);
-
-            // Bottom light (below)
-            const bottomLight = new THREE.PointLight(0xffffff, 1.2, maxDim * 4);
-            bottomLight.position.set(center.x, center.y - size.y / 2 - 0.2, center.z);
-            bottomLight.castShadow = true;
-            inferenceScene.add(bottomLight);
-
-            // Optional side lights if you want even illumination
-            const leftLight = new THREE.PointLight(0xffffff, 0.8, maxDim * 4);
-            leftLight.position.set(center.x - size.x / 2 - 0.2, center.y, center.z);
-            inferenceScene.add(leftLight);
-
-            const rightLight = new THREE.PointLight(0xffffff, 0.8, maxDim * 4);
-            rightLight.position.set(center.x + size.x / 2 + 0.2, center.y, center.z);
-            inferenceScene.add(rightLight);
-
-            window.topLight = topLight;
-            window.bottomLight = bottomLight;
-            window.leftLight = leftLight;
-            window.rightLight = rightLight;
-        }
-
 
         function normQuat(q) {
             const n = Math.sqrt(q[0] ** 2 + q[1] ** 2 + q[2] ** 2 + q[3] ** 2) + 1e-8;
