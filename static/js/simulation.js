@@ -110,11 +110,15 @@ export class SimulationController {
 
     /**
      * Run pose inference from canvas
+     * @param {THREE.WebGLRenderer} renderer - The renderer that has just rendered the inference scene
      */
-    async runInference(canvas) {
+    async runInference(renderer) {
         if (!this.inference.ready()) return;
 
         try {
+            // Get the canvas from the renderer (it's already been rendered)
+            const canvas = renderer.domElement;
+
             // Predict pose from inference camera
             const result = await this.inference.predictPose(canvas);
 

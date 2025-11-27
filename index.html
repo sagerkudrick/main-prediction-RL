@@ -103,8 +103,14 @@
 
     <!-- Inference Preview -->
     <div id="image-preview">
-        <h3>Inference Camera</h3>
-        <canvas id="inference-image"></canvas>
+        <div class="camera-view">
+            <h3>Current Pose (Inference)</h3>
+            <canvas id="inference-image"></canvas>
+        </div>
+        <div class="camera-view">
+            <h3>Predicted Pose</h3>
+            <canvas id="prediction-image"></canvas>
+        </div>
     </div>
 
     <!-- Error Handler -->
@@ -141,8 +147,9 @@
         const INFERENCE_INTERVAL = 15;
 
         let scene, camera, renderer, controls;
-        let crateMesh, inferenceCrate, wallGroup;
+        let crateMesh, inferenceCrate, predictionCrate, wallGroup;
         let inferenceCanvas, inferenceRenderer, inferenceScene, inferenceCamera;
+        let predictionCanvas, predictionRenderer, predictionScene, predictionCamera;
         let raycaster, mouse;
         let isDragging = false;
         let debugMesh;
@@ -269,12 +276,6 @@
             });
             inferenceRenderer.setSize(224, 224);
 
-            // inferenceScene.add(new THREE.AmbientLight(0xffffff, 0.8));
-            // const light = new THREE.DirectionalLight(0xffffff, 1);
-            // light.position.set(2, 3, 2);
-            // inferenceScene.add(light);
-            let inferenceTopLight;
-            let inferenceBottomLight;
             // Convert W to Three.js intensity roughly: 1 W ≈ 0.5-1 intensity depending on scene scale
             const intensity = 35; // scaling factor for Three.js, adjust visually
 
@@ -293,14 +294,14 @@
             topLight.position.set(centerX + 2, 3.2, centerZ); // slightly above top
             topLight.castShadow = true;
 
-            inferenceTopLight = topLight.clone();
+            const inferenceTopLight = topLight.clone();
             scene.add(topLight);
 
             // Bottom light
             const bottomLight = new THREE.PointLight(0xffffff, intensity * 0.8, Math.max(sizeX, sizeY, sizeZ) * 2);
             bottomLight.position.set(centerX - 1.5, -2, centerZ + 1); // slightly below bottom
             bottomLight.castShadow = true;
-            inferenceBottomLight = bottomLight.clone();
+            const inferenceBottomLight = bottomLight.clone();
             scene.add(bottomLight);
 
             window.topLight = topLight
@@ -309,13 +310,39 @@
             addLightHelper(topLight, 0.5, 0xffff00, 0.1);
             addLightHelper(bottomLight, 0.5, 0xff00ff, 0.1);
 
-
             inferenceTopLight.castShadow = true;
             inferenceBottomLight.castShadow = true;
 
             inferenceScene.add(inferenceTopLight);
             inferenceScene.add(inferenceBottomLight);
 
+            // Initialize prediction scene (same setup as inference)
+            predictionScene = new THREE.Scene();
+            predictionScene.background = new THREE.Color(0xffffff);
+
+            predictionCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+            predictionCamera.position.set(0, 0, 3);
+            predictionCamera.lookAt(0, 0, 0);
+
+            predictionCanvas = document.getElementById('prediction-image');
+            predictionCanvas.width = 224;
+            predictionCanvas.height = 224;
+
+            predictionRenderer = new THREE.WebGLRenderer({
+                canvas: predictionCanvas,
+                antialias: true,
+                preserveDrawingBuffer: true
+            });
+            predictionRenderer.setSize(224, 224);
+
+            // Clone lights for prediction scene
+            const predictionTopLight = topLight.clone();
+            predictionTopLight.castShadow = true;
+            predictionScene.add(predictionTopLight);
+
+            const predictionBottomLight = bottomLight.clone();
+            predictionBottomLight.castShadow = true;
+            predictionScene.add(predictionBottomLight);
         }
 
         // Create visual walls matching physics
@@ -490,6 +517,19 @@
                     }
                 });
                 inferenceScene.add(inferenceCrate);
+
+                // 5. Create prediction crate (clone of inference crate)
+                predictionCrate = new THREE.Group();
+                crateMesh.traverse(node => {
+                    if (node.isMesh) {
+                        const clone = new THREE.Mesh(node.geometry.clone(), node.material.clone());
+                        clone.position.copy(node.position);
+                        clone.rotation.copy(node.rotation);
+                        clone.scale.copy(node.scale);
+                        predictionCrate.add(clone);
+                    }
+                });
+                predictionScene.add(predictionCrate);
             });
         }
 
@@ -558,20 +598,35 @@
             // Cosine loss
             const cos = quatCosineLoss(predQuat, actualQuat);
             document.getElementById("cos-loss").textContent = cos.toFixed(6);
+
+            // Update prediction crate orientation
+            if (predictionCrate) {
+                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
+            }
         };
 
         // Animation loop
         async function animate() {
             requestAnimationFrame(animate);
 
-            if (simulation.isRunning && inferenceCrate) {
-                await simulation.step(inferenceCanvas, INFERENCE_INTERVAL);
-
+            if (simulation.isRunning && inferenceCrate && predictionCrate) {
+                // Update inference crate to match current pose
                 inferenceCrate.position.set(0, 0, 0);
                 inferenceCrate.quaternion.copy(crateMesh.quaternion);
                 inferenceCrate.scale.copy(crateMesh.scale);
 
+                // Render inference scene BEFORE capturing for inference
                 inferenceRenderer.render(inferenceScene, inferenceCamera);
+
+                // Update prediction crate position (rotation is set by onInferenceUpdate)
+                predictionCrate.position.set(0, 0, 0);
+                predictionCrate.scale.copy(crateMesh.scale);
+
+                // Render prediction scene
+                predictionRenderer.render(predictionScene, predictionCamera);
+
+                // Now run simulation step (which may capture the inference canvas)
+                await simulation.step(inferenceRenderer, INFERENCE_INTERVAL);
             }
 
             controls.update();

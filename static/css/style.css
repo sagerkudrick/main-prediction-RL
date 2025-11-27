@@ -282,22 +282,36 @@ body {
     padding: 16px;
     z-index: 10;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    display: flex;
+    gap: 16px;
 }
 
-#image-preview h3 {
+.camera-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.camera-view h3 {
     font-size: 14px;
     font-weight: 600;
     margin-bottom: 12px;
     color: rgba(255, 255, 255, 0.8);
+    text-align: center;
 }
 
-#inference-image {
-    width: 256px;
-    height: 256px;
+#inference-image,
+#prediction-image {
+    width: 224px;
+    height: 224px;
     border-radius: 8px;
     border: 2px solid rgba(255, 255, 255, 0.3);
     background: rgba(0, 0, 0, 0.3);
     display: block;
+}
+
+#prediction-image {
+    border-color: rgba(74, 222, 128, 0.5);
 }
 
 /* Loading Spinner */
