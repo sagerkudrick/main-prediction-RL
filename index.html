@@ -175,6 +175,15 @@
             ];
         }
 
+        // Convert Three.js quaternion to Blender format
+        // Three.js: [x, y, z, w] -> Blender: [w, x, z, y]
+        function threeToBlenderQuat(threeQuat) {
+            // Based on your example: Three.js (-0.562, -0.314, -0.243, 0.726) 
+            // -> Blender (0.726, -0.562, -0.243, -0.314)
+            // Mapping: Blender = [threeQuat[3], threeQuat[0], threeQuat[2], threeQuat[1]]
+            return [threeQuat[3], threeQuat[0], threeQuat[2], threeQuat[1]];
+        }
+
         function quaternionAngularDistance(q1, q2) {
             const dot =
                 q1[0] * q2[0] +
@@ -490,9 +499,10 @@
             crateMesh.quaternion.set(...state.quaternion);
 
             simulation.lastQuaternion = state.quaternion;
-
+            // Convert to Blender format for display
+            const blenderQuat = threeToBlenderQuat(state.quaternion);
             document.getElementById('actual-quat').textContent =
-                `[${state.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+                `x:${blenderQuat[0].toFixed(3)}, y:${blenderQuat[1].toFixed(3)}, z:${blenderQuat[2].toFixed(3)}, w:${blenderQuat[3].toFixed(3)}`;
 
             const euler = quatToEulerDegrees(state.quaternion);
             document.getElementById('actual-euler').textContent =
@@ -524,19 +534,18 @@
 
 
         simulation.onInferenceUpdate = (result) => {
-            const predQuat = result.quaternion;
-
-            // Update predicted quat display
+            const predQuat = result.quaternion; // Already in Blender format from model
+            // Update predicted quat display with labels
             document.getElementById('predicted-quat').textContent =
-                `[${predQuat.map(v => v.toFixed(3)).join(', ')}]`;
+                `x:${predQuat[0].toFixed(3)}, y:${predQuat[1].toFixed(3)}, z:${predQuat[2].toFixed(3)}, w:${predQuat[3].toFixed(3)}`;
 
             const predEuler = quatToEulerDegrees(predQuat);
             document.getElementById('pred-euler').textContent =
                 `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
 
             // Get actual quat from simulation loop
-            const actualQuat = simulation.lastQuaternion;
-
+            // Get actual quat from simulation loop and convert to Blender format
+            const actualQuat = threeToBlenderQuat(simulation.lastQuaternion);
             if (!actualQuat) {
                 console.warn("Actual quaternion not set yet.");
                 return;
