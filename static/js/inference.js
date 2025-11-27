@@ -12,6 +12,7 @@ export class InferenceManager {
         this.useMockData = false; // Try to load real ONNX models
     }
 
+
     /**
      * Load both ONNX models (or skip if using mock data)
      */
@@ -107,11 +108,15 @@ export class InferenceManager {
      * @param {HTMLCanvasElement} canvas - Canvas containing the rendered image
      * @returns {Object} - {quaternion: [x,y,z,w], euler: [x,y,z]}
      */
+    /**
+    * Predict pose (quaternion) from image
+    * @param {HTMLCanvasElement} canvas - Canvas containing the rendered image
+    * @returns {Object} - {quaternion: [x,y,z,w], euler: [x,y,z]}
+    */
     async predictPose(canvas) {
         if (!this.isReady) {
             throw new Error('Models not loaded yet');
         }
-
 
         // Use mock data if models aren't loaded or canvas is missing
         if (this.useMockData || !canvas) {
@@ -122,44 +127,64 @@ export class InferenceManager {
         }
 
         try {
-            // For WebGL canvas, we need to read pixels directly
             const width = canvas.width;
             const height = canvas.height;
 
-            // Create a temporary 2D canvas to get image data
+            // Draw WebGL canvas onto 2D canvas
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = width;
             tempCanvas.height = height;
             const tempCtx = tempCanvas.getContext('2d');
-
-            // Draw the WebGL canvas onto the 2D canvas
             tempCtx.drawImage(canvas, 0, 0, width, height);
 
-            // Now get the image data
             const imageData = tempCtx.getImageData(0, 0, width, height);
 
-            // Preprocess image to match PyTorch preprocessing (resize to 224x224, normalize)
+            // Preprocess to tensor
             const tensor = this.preprocessImage(imageData, 224, 224);
             const inputTensor = new ort.Tensor('float32', tensor, [1, 3, 224, 224]);
 
+            // Run ONNX model
             const feeds = { input: inputTensor };
             const results = await this.poseSession.run(feeds);
 
             const output = results.output.data;
             const quaternion = Array.from(output.slice(0, 4));
             const normalized = this.normalizeQuaternion(quaternion);
-            const euler = this.quaternionToEuler(normalized);
 
-            return { quaternion: normalized, euler };
+            // -----------------------------
+            // CONVERT BLENDER → THREE.JS
+            // -----------------------------
+            const threeQuat = this.blenderToThreeJSQuat(normalized);
+
+            const euler = this.quaternionToEuler(threeQuat);
+
+            return { quaternion: threeQuat, euler };
         } catch (error) {
             console.error('Pose prediction error:', error);
-            // Return identity quaternion on error
             return {
                 quaternion: [0, 0, 0, 1],
                 euler: [0, 0, 0]
             };
         }
     }
+
+    /**
+     * Convert Blender quaternion [w, x, y, z] → Three.js [x, y, z, w]
+     * and map axes Z-up → Y-up
+     */
+    blenderToThreeJSQuat(q) {
+        // q is [x, y, z, w] from ONNX
+        const [x, y, z, w] = q;
+
+        // Map axes: Blender Z → Three.js Y, Blender Y → Three.js Z, X stays
+        const threeX = x;
+        const threeY = z;
+        const threeZ = y;
+        const threeW = w;
+
+        return [threeX, threeY, threeZ, threeW];
+    }
+
 
     /**
      * Predict RL action from observation
