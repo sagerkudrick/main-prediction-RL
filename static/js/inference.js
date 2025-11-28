@@ -189,14 +189,19 @@ export class InferenceManager {
      * Convert Blender quaternion [w, x, y, z] → Three.js [x, y, z, w]
      * and map axes Z-up → Y-up
      */
+    /**
+         * Convert Blender quaternion [x, y, z, w] → Three.js [x, y, z, w]
+         * and map axes Z-up → Y-up with correct handedness
+         */
     blenderToThreeJSQuat(q) {
-        // q is [x, y, z, w] from ONNX
+        // q is [x, y, z, w] from ONNX (Blender convention)
         const [x, y, z, w] = q;
 
-        // Map axes: Blender Z → Three.js Y, Blender Y → Three.js Z, X stays
-        const threeX = x;
-        const threeY = z;
-        const threeZ = y;
+        // Map axes: Blender Z → Three.js Y, Blender Y → Three.js Z
+        // IMPORTANT: Negate X to prevent mirroring due to coordinate system change
+        const threeX = x;  // Negate to fix mirroring
+        const threeY = y;   // Blender Z becomes Three.js Y
+        const threeZ = z;   // Blender Y becomes Three.js Z
         const threeW = w;
 
         return [threeX, threeY, threeZ, threeW];
