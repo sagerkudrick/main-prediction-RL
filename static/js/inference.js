@@ -103,11 +103,7 @@ export class InferenceManager {
         }
     }
 
-    /**
-     * Predict pose (quaternion) from image
-     * @param {HTMLCanvasElement} canvas - Canvas containing the rendered image
-     * @returns {Object} - {quaternion: [x,y,z,w], euler: [x,y,z]}
-     */
+
     /**
     * Predict pose (quaternion) from image
     * @param {HTMLCanvasElement} canvas - Canvas containing the rendered image
@@ -170,7 +166,7 @@ export class InferenceManager {
             // -----------------------------
             // CONVERT BLENDER → THREE.JS
             // -----------------------------
-            const threeQuat = this.blenderToThreeJSQuat(normalized);
+            const threeQuat = this.threeToBlenderQuat(normalized);
             //console.log('Converted to Three.js:', threeQuat);
 
             const euler = this.quaternionToEuler(threeQuat);
@@ -193,15 +189,17 @@ export class InferenceManager {
          * Convert Blender quaternion [x, y, z, w] → Three.js [x, y, z, w]
          * and map axes Z-up → Y-up with correct handedness
          */
-    blenderToThreeJSQuat(q) {
+    threeToBlenderQuat(q) {
         // q = [x, y, z, w] from Blender
         const [x, y, z, w] = q;
 
         // Flip Z axis to match Three.js forward (-Z)
-        const threeX = -x;
-        const threeY = -y;
+        const threeX = x;
+        const threeY = y;
         const threeZ = z;
         const threeW = w;
+
+        //console.log("bthreeToBlenderQuat  ", threeX, " ", threeY, " ", threeZ, " ", threeW)
 
         return [threeX, threeY, threeZ, threeW];
     }

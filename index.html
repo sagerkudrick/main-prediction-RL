@@ -184,14 +184,6 @@
             ];
         }
 
-        // Convert Three.js quaternion to Blender format
-        // Three.js: [x, y, z, w] -> Blender: [w, x, z, y]
-        function threeToBlenderQuat(threeQuat) {
-            // Based on your example: Three.js (-0.562, -0.314, -0.243, 0.726) 
-            // -> Blender (0.726, -0.562, -0.243, -0.314)
-            // Mapping: Blender = [threeQuat[3], threeQuat[0], threeQuat[2], threeQuat[1]]
-            return [threeQuat[3], threeQuat[0], threeQuat[2], threeQuat[1]];
-        }
 
         function quaternionAngularDistance(q1, q2) {
             const dot =
@@ -323,7 +315,7 @@
             predictionScene.background = new THREE.Color(0xffffff);
 
             predictionCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-            predictionCamera.position.set(0, 0, 3);
+            predictionCamera.position.set(0, 0, 3.5);
             predictionCamera.lookAt(0, 0, 0);
 
             predictionCanvas = document.getElementById('prediction-image');
@@ -539,81 +531,6 @@
             });
         }
 
-        // Simulation callbacks
-        simulation.onStateUpdate = (state) => {
-            crateMesh.position.set(...state.position);
-            crateMesh.quaternion.set(...state.quaternion);
-
-            simulation.lastQuaternion = state.quaternion;
-            // Convert to Blender format for display
-            const blenderQuat = threeToBlenderQuat(state.quaternion);
-            document.getElementById('actual-quat').textContent =
-                `x:${blenderQuat[0].toFixed(3)}, y:${blenderQuat[1].toFixed(3)}, z:${blenderQuat[2].toFixed(3)}, w:${blenderQuat[3].toFixed(3)}`;
-
-            const euler = quatToEulerDegrees(state.quaternion);
-            document.getElementById('actual-euler').textContent =
-                `[${euler.map(v => v.toFixed(1)).join(', ')}]`;
-
-            if (debugMesh) {
-                debugMesh.position.copy(crateMesh.position);
-                debugMesh.quaternion.copy(crateMesh.quaternion);
-            }
-
-            const actualEuler = quatToEulerDegrees(state.quaternion);
-            document.getElementById('actual-euler').textContent =
-                `[${actualEuler.map(v => v.toFixed(1)).join(', ')}]`;
-
-
-            document.getElementById('pos-x-val').textContent = state.position[0].toFixed(2);
-            document.getElementById('pos-y-val').textContent = state.position[1].toFixed(2);
-            document.getElementById('pos-z-val').textContent = state.position[2].toFixed(2);
-            document.getElementById('step-count').textContent = state.step_count;
-            document.getElementById('actual-quat').textContent =
-                `[${state.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
-
-            if (state.action) {
-                document.getElementById('rl-action').textContent =
-                    `[${state.action.map(v => v.toFixed(3)).join(', ')}]`;
-            }
-        };
-
-
-
-        simulation.onInferenceUpdate = (result) => {
-            const predQuat = result.quaternion; // In Three.js format [x,y,z,w]
-            console.log('🔮 Inference update - predQuat (Three.js):', predQuat);
-            // Update predicted quat display with labels
-            document.getElementById('predicted-quat').textContent =
-                `x:${predQuat[0].toFixed(3)}, y:${predQuat[1].toFixed(3)}, z:${predQuat[2].toFixed(3)}, w:${predQuat[3].toFixed(3)}`;
-
-            const predEuler = quatToEulerDegrees(predQuat);
-            document.getElementById('pred-euler').textContent =
-                `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
-
-            // Get actual quat from simulation loop
-            // Get actual quat from simulation loop and convert to Blender format
-            const actualQuat = threeToBlenderQuat(simulation.lastQuaternion);
-            if (!actualQuat) {
-                console.warn("Actual quaternion not set yet.");
-                return;
-            }
-
-            // Angular distance (°)
-            const angle = quaternionAngularDistance(predQuat, actualQuat);
-            document.getElementById("quat-loss").textContent = angle.toFixed(2);
-
-            // Cosine loss
-            const cos = quatCosineLoss(predQuat, actualQuat);
-            document.getElementById("cos-loss").textContent = cos.toFixed(6);
-
-            // Update prediction crate orientation
-            if (predictionCrate) {
-                console.log('📦 Updating prediction crate with quaternion:', predQuat);
-                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
-            } else {
-                console.warn('⚠️ predictionCrate not initialized yet');
-            }
-        };
         function quatCosineLoss(pred, actual) {
             // pred = [x,y,z,w]
             // actual = [x,y,z,w]
@@ -678,16 +595,17 @@
 
 
 
-
-
         // Simulation callbacks
         simulation.onStateUpdate = (state) => {
             crateMesh.position.set(...state.position);
             crateMesh.quaternion.set(...state.quaternion);
 
             simulation.lastQuaternion = state.quaternion;
+
+            const infermang = new InferenceManager()
+
             // Convert to Blender format for display
-            const blenderQuat = threeToBlenderQuat(state.quaternion);
+            const blenderQuat = infermang.threeToBlenderQuat(state.quaternion);
             document.getElementById('actual-quat').textContent =
                 `x:${blenderQuat[0].toFixed(3)}, y:${blenderQuat[1].toFixed(3)}, z:${blenderQuat[2].toFixed(3)}, w:${blenderQuat[3].toFixed(3)}`;
 
@@ -733,7 +651,9 @@
 
             // Get actual quat from simulation loop
             // Get actual quat from simulation loop and convert to Blender format
-            const actualQuat = threeToBlenderQuat(simulation.lastQuaternion);
+
+            const infermang = new InferenceManager()
+            const actualQuat = infermang.threeToBlenderQuat(simulation.lastQuaternion);
             if (!actualQuat) {
                 console.warn("Actual quaternion not set yet.");
                 return;
@@ -750,47 +670,21 @@
             // Update prediction crate orientation
             if (predictionCrate) {
                 //console.log('📦 Updating prediction crate with quaternion:', predQuat);
-                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
+
+                let qOrig = new THREE.Quaternion(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
+
+                // Create a quaternion representing 180° rotation around Y
+                let qY180 = new THREE.Quaternion(0, 1, 0, 0); // 180° Y rotation
+
+                // Multiply to rotate the original quaternion
+                qOrig.multiply(qY180); // or qOrig.multiply(qY180); depending on order
+
+
+                predictionCrate.quaternion.set(qOrig);
             } else {
                 console.warn('⚠️ predictionCrate not initialized yet');
             }
         };
-
-
-        // UI Controls
-        document.getElementById('start-btn').addEventListener('click', () => {
-            simulation.start();
-            document.getElementById('start-btn').disabled = true;
-            document.getElementById('stop-btn').disabled = false;
-        });
-
-        document.getElementById('stop-btn').addEventListener('click', () => {
-            simulation.stop();
-            document.getElementById('start-btn').disabled = false;
-            document.getElementById('stop-btn').disabled = true;
-        });
-
-        document.getElementById('reset-btn').addEventListener('click', () => {
-            simulation.reset();
-        });
-
-        document.getElementById('rl-enabled-check').addEventListener('change', (e) => {
-            simulation.setRLEnabled(e.target.checked);
-        });
-
-        document.getElementById('wall-size-slider').addEventListener('input', (e) => {
-            const size = parseFloat(e.target.value);
-            document.getElementById('wall-size-val').textContent = size.toFixed(1);
-            updateWalls(size);
-        });
-
-
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
 
         // Mouse interaction for ragdoll physics
         function getMouseWorldPoint(event) {
@@ -860,22 +754,6 @@
                 inferenceCrate.position.set(0, 0, 0);
                 inferenceCrate.quaternion.copy(crateMesh.quaternion);
                 inferenceCrate.scale.copy(crateMesh.scale);
-
-                // Debug: Log actual crate quaternion occasionally
-                // if (Math.random() < 0.05) { // 5% of frames
-                //     console.log('🎲 Actual crate quaternion:', [
-                //         crateMesh.quaternion.x,
-                //         crateMesh.quaternion.y,
-                //         crateMesh.quaternion.z,
-                //         crateMesh.quaternion.w
-                //     ]);
-                //     console.log('📷 Inference crate quaternion:', [
-                //         inferenceCrate.quaternion.x,
-                //         inferenceCrate.quaternion.y,
-                //         inferenceCrate.quaternion.z,
-                //         inferenceCrate.quaternion.w
-                //     ]);
-                // }
 
                 // Render inference scene BEFORE capturing for inference
                 inferenceRenderer.render(inferenceScene, inferenceCamera);
