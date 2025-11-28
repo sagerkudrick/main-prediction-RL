@@ -194,18 +194,18 @@ export class InferenceManager {
          * and map axes Z-up → Y-up with correct handedness
          */
     blenderToThreeJSQuat(q) {
-        // q is [x, y, z, w] from ONNX (Blender convention)
+        // q = [x, y, z, w] from Blender
         const [x, y, z, w] = q;
 
-        // Map axes: Blender Z → Three.js Y, Blender Y → Three.js Z
-        // IMPORTANT: Negate X to prevent mirroring due to coordinate system change
-        const threeX = x;  // Negate to fix mirroring
-        const threeY = y;   // Blender Z becomes Three.js Y
-        const threeZ = z;   // Blender Y becomes Three.js Z
+        // Flip Z axis to match Three.js forward (-Z)
+        const threeX = -x;
+        const threeY = -y;
+        const threeZ = z;
         const threeW = w;
 
         return [threeX, threeY, threeZ, threeW];
     }
+
 
 
     /**
