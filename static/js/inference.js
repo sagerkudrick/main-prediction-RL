@@ -2,6 +2,7 @@
  * ONNX Inference Module - MOCK VERSION
  * Returns dummy predictions until ONNX models are working
  */
+import * as THREE from 'three';
 
 export class InferenceManager {
     constructor() {
@@ -189,20 +190,23 @@ export class InferenceManager {
          * Convert Blender quaternion [x, y, z, w] → Three.js [x, y, z, w]
          * and map axes Z-up → Y-up with correct handedness
          */
-    threeToBlenderQuat(q) {
-        // q = [x, y, z, w] from Blender
-        const [x, y, z, w] = q;
+threeToBlenderQuat(q) {
+    // q = [x, y, z, w] from Blender / Three.js
+    const [x, y, z, w] = q;
 
-        // Flip Z axis to match Three.js forward (-Z)
-        const threeX = x;
-        const threeY = y;
-        const threeZ = z;
-        const threeW = w;
+    // Create a Three.js quaternion from the input
+    const qOrig = new THREE.Quaternion(x, y, z, w);
 
-        //console.log("bthreeToBlenderQuat  ", threeX, " ", threeY, " ", threeZ, " ", threeW)
+    // Create a quaternion representing 180° rotation around Y
+    const qY180 = new THREE.Quaternion();
+    qY180.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); // 180 degrees
 
-        return [threeX, threeY, threeZ, threeW];
-    }
+    // Multiply to rotate by 180° around Y
+    qOrig.multiply(qY180); // Applies Y-rotation **after** the original
+
+    // Return as array
+    return [qOrig.x, qOrig.y, qOrig.z, qOrig.w];
+}
 
 
 

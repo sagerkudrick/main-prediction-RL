@@ -670,17 +670,7 @@
             // Update prediction crate orientation
             if (predictionCrate) {
                 //console.log('📦 Updating prediction crate with quaternion:', predQuat);
-
-                let qOrig = new THREE.Quaternion(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
-
-                // Create a quaternion representing 180° rotation around Y
-                let qY180 = new THREE.Quaternion(0, 1, 0, 0); // 180° Y rotation
-
-                // Multiply to rotate the original quaternion
-                qOrig.multiply(qY180); // or qOrig.multiply(qY180); depending on order
-                //console.log(qY180["_x"], qY180["_y"], qY180["_z"], qY180["_w"])
-
-                predictionCrate.quaternion.set(qOrig["_x"], qOrig["_y"], qOrig["_z"], qOrig["_w"]);
+                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
             } else {
                 console.warn('⚠️ predictionCrate not initialized yet');
             }
