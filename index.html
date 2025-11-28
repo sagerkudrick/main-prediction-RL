@@ -52,6 +52,8 @@
             <label>Wall Size: <span id="wall-size-val">1.0</span>m</label>
             <input type="range" id="wall-size-slider" min="0.5" max="5.0" step="0.1" value="1.0">
         </div>
+
+        <button id="save-inference-btn" class="button">💾 Save Inference Image</button>
     </div>
 
     <!-- Diagnostics -->
@@ -144,7 +146,7 @@
         import { SimulationController } from './static/js/simulation.js';
         import { addLightHelper } from './static/js/light-helpers.js';
 
-        const INFERENCE_INTERVAL = 15;
+        const INFERENCE_INTERVAL = 5;
 
         let scene, camera, renderer, controls;
         let crateMesh, inferenceCrate, predictionCrate, wallGroup;
@@ -505,30 +507,34 @@
                 });
                 scene.add(crateMesh);
 
-                // 4. Create inference crate
+                // 4. Create inference crate - DON'T copy child rotations!
                 inferenceCrate = new THREE.Group();
                 crateMesh.traverse(node => {
                     if (node.isMesh) {
                         const clone = new THREE.Mesh(node.geometry.clone(), node.material.clone());
                         clone.position.copy(node.position);
-                        clone.rotation.copy(node.rotation);
+                        // DON'T copy rotation - let parent group control it
                         clone.scale.copy(node.scale);
                         inferenceCrate.add(clone);
                     }
                 });
+                // Apply the base rotation to the group instead
+                inferenceCrate.rotation.y = Math.PI;
                 inferenceScene.add(inferenceCrate);
 
-                // 5. Create prediction crate (clone of inference crate)
+                // 5. Create prediction crate - DON'T copy child rotations!
                 predictionCrate = new THREE.Group();
                 crateMesh.traverse(node => {
                     if (node.isMesh) {
                         const clone = new THREE.Mesh(node.geometry.clone(), node.material.clone());
                         clone.position.copy(node.position);
-                        clone.rotation.copy(node.rotation);
+                        // DON'T copy rotation - let parent group control it
                         clone.scale.copy(node.scale);
                         predictionCrate.add(clone);
                     }
                 });
+                // Apply the base rotation to the group instead
+                predictionCrate.rotation.y = Math.PI;
                 predictionScene.add(predictionCrate);
             });
         }
@@ -574,7 +580,8 @@
 
 
         simulation.onInferenceUpdate = (result) => {
-            const predQuat = result.quaternion; // Already in Blender format from model
+            const predQuat = result.quaternion; // In Three.js format [x,y,z,w]
+            console.log('🔮 Inference update - predQuat (Three.js):', predQuat);
             // Update predicted quat display with labels
             document.getElementById('predicted-quat').textContent =
                 `x:${predQuat[0].toFixed(3)}, y:${predQuat[1].toFixed(3)}, z:${predQuat[2].toFixed(3)}, w:${predQuat[3].toFixed(3)}`;
@@ -601,38 +608,12 @@
 
             // Update prediction crate orientation
             if (predictionCrate) {
+                console.log('📦 Updating prediction crate with quaternion:', predQuat);
                 predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
+            } else {
+                console.warn('⚠️ predictionCrate not initialized yet');
             }
         };
-
-        // Animation loop
-        async function animate() {
-            requestAnimationFrame(animate);
-
-            if (simulation.isRunning && inferenceCrate && predictionCrate) {
-                // Update inference crate to match current pose
-                inferenceCrate.position.set(0, 0, 0);
-                inferenceCrate.quaternion.copy(crateMesh.quaternion);
-                inferenceCrate.scale.copy(crateMesh.scale);
-
-                // Render inference scene BEFORE capturing for inference
-                inferenceRenderer.render(inferenceScene, inferenceCamera);
-
-                // Update prediction crate position (rotation is set by onInferenceUpdate)
-                predictionCrate.position.set(0, 0, 0);
-                predictionCrate.scale.copy(crateMesh.scale);
-
-                // Render prediction scene
-                predictionRenderer.render(predictionScene, predictionCamera);
-
-                // Now run simulation step (which may capture the inference canvas)
-                await simulation.step(inferenceRenderer, INFERENCE_INTERVAL);
-            }
-
-            controls.update();
-            renderer.render(scene, camera);
-        }
-
         function quatCosineLoss(pred, actual) {
             // pred = [x,y,z,w]
             // actual = [x,y,z,w]
@@ -684,6 +665,126 @@
             document.getElementById('wall-size-val').textContent = size.toFixed(1);
             updateWalls(size);
         });
+
+        document.getElementById('save-inference-btn').addEventListener('click', () => {
+            window.saveNextInferenceImage = true;
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+
+
+
+
+        // Simulation callbacks
+        simulation.onStateUpdate = (state) => {
+            crateMesh.position.set(...state.position);
+            crateMesh.quaternion.set(...state.quaternion);
+
+            simulation.lastQuaternion = state.quaternion;
+            // Convert to Blender format for display
+            const blenderQuat = threeToBlenderQuat(state.quaternion);
+            document.getElementById('actual-quat').textContent =
+                `x:${blenderQuat[0].toFixed(3)}, y:${blenderQuat[1].toFixed(3)}, z:${blenderQuat[2].toFixed(3)}, w:${blenderQuat[3].toFixed(3)}`;
+
+            const euler = quatToEulerDegrees(state.quaternion);
+            document.getElementById('actual-euler').textContent =
+                `[${euler.map(v => v.toFixed(1)).join(', ')}]`;
+
+            if (debugMesh) {
+                debugMesh.position.copy(crateMesh.position);
+                debugMesh.quaternion.copy(crateMesh.quaternion);
+            }
+
+            const actualEuler = quatToEulerDegrees(state.quaternion);
+            document.getElementById('actual-euler').textContent =
+                `[${actualEuler.map(v => v.toFixed(1)).join(', ')}]`;
+
+
+            document.getElementById('pos-x-val').textContent = state.position[0].toFixed(2);
+            document.getElementById('pos-y-val').textContent = state.position[1].toFixed(2);
+            document.getElementById('pos-z-val').textContent = state.position[2].toFixed(2);
+            document.getElementById('step-count').textContent = state.step_count;
+            document.getElementById('actual-quat').textContent =
+                `[${state.quaternion.map(v => v.toFixed(3)).join(', ')}]`;
+
+            if (state.action) {
+                document.getElementById('rl-action').textContent =
+                    `[${state.action.map(v => v.toFixed(3)).join(', ')}]`;
+            }
+        };
+
+
+
+        simulation.onInferenceUpdate = (result) => {
+            const predQuat = result.quaternion; // In Three.js format [x,y,z,w]
+            //console.log('🔮 Inference update - predQuat (Three.js):', predQuat);
+            // Update predicted quat display with labels
+            document.getElementById('predicted-quat').textContent =
+                `x:${predQuat[0].toFixed(3)}, y:${predQuat[1].toFixed(3)}, z:${predQuat[2].toFixed(3)}, w:${predQuat[3].toFixed(3)}`;
+
+            const predEuler = quatToEulerDegrees(predQuat);
+            document.getElementById('pred-euler').textContent =
+                `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
+
+            // Get actual quat from simulation loop
+            // Get actual quat from simulation loop and convert to Blender format
+            const actualQuat = threeToBlenderQuat(simulation.lastQuaternion);
+            if (!actualQuat) {
+                console.warn("Actual quaternion not set yet.");
+                return;
+            }
+
+            // Angular distance (°)
+            const angle = quaternionAngularDistance(predQuat, actualQuat);
+            document.getElementById("quat-loss").textContent = angle.toFixed(2);
+
+            // Cosine loss
+            const cos = quatCosineLoss(predQuat, actualQuat);
+            document.getElementById("cos-loss").textContent = cos.toFixed(6);
+
+            // Update prediction crate orientation
+            if (predictionCrate) {
+                //console.log('📦 Updating prediction crate with quaternion:', predQuat);
+                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
+            } else {
+                console.warn('⚠️ predictionCrate not initialized yet');
+            }
+        };
+
+
+        // UI Controls
+        document.getElementById('start-btn').addEventListener('click', () => {
+            simulation.start();
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+        });
+
+        document.getElementById('stop-btn').addEventListener('click', () => {
+            simulation.stop();
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            simulation.reset();
+        });
+
+        document.getElementById('rl-enabled-check').addEventListener('change', (e) => {
+            simulation.setRLEnabled(e.target.checked);
+        });
+
+        document.getElementById('wall-size-slider').addEventListener('input', (e) => {
+            const size = parseFloat(e.target.value);
+            document.getElementById('wall-size-val').textContent = size.toFixed(1);
+            updateWalls(size);
+        });
+
+
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -748,6 +849,50 @@
                     simulation.releaseBox();
                 }
             });
+        }
+
+        // Animation loop
+        async function animate() {
+            requestAnimationFrame(animate);
+
+            if (simulation.isRunning && inferenceCrate && predictionCrate) {
+                // Update inference crate to match current pose BEFORE rendering
+                inferenceCrate.position.set(0, 0, 0);
+                inferenceCrate.quaternion.copy(crateMesh.quaternion);
+                inferenceCrate.scale.copy(crateMesh.scale);
+
+                // Debug: Log actual crate quaternion occasionally
+                // if (Math.random() < 0.05) { // 5% of frames
+                //     console.log('🎲 Actual crate quaternion:', [
+                //         crateMesh.quaternion.x,
+                //         crateMesh.quaternion.y,
+                //         crateMesh.quaternion.z,
+                //         crateMesh.quaternion.w
+                //     ]);
+                //     console.log('📷 Inference crate quaternion:', [
+                //         inferenceCrate.quaternion.x,
+                //         inferenceCrate.quaternion.y,
+                //         inferenceCrate.quaternion.z,
+                //         inferenceCrate.quaternion.w
+                //     ]);
+                // }
+
+                // Render inference scene BEFORE capturing for inference
+                inferenceRenderer.render(inferenceScene, inferenceCamera);
+
+                // Update prediction crate position (rotation is set by onInferenceUpdate)
+                predictionCrate.position.set(0, 0, 0);
+                predictionCrate.scale.copy(crateMesh.scale);
+
+                // Render prediction scene
+                predictionRenderer.render(predictionScene, predictionCamera);
+
+                // Now run simulation step (which may capture the inference canvas)
+                await simulation.step(inferenceRenderer, INFERENCE_INTERVAL);
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
         }
 
         // Initialize

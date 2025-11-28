@@ -37,7 +37,7 @@ export class InferenceManager {
             }
 
             // Try different execution providers
-            const providers = ['webgl', 'wasm'];
+            const providers = ['webgl'];
 
             // Load pose prediction model
             console.log('  Loading pose model...');
@@ -85,7 +85,7 @@ export class InferenceManager {
 
             if (!rlLoaded) {
                 console.warn('  ⚠ Failed to load RL policy, using mock data');
-                this.useMockData = true;
+                //this.useMockData = true;
             }
 
             this.isReady = true;
@@ -120,6 +120,7 @@ export class InferenceManager {
 
         // Use mock data if models aren't loaded or canvas is missing
         if (this.useMockData || !canvas) {
+            console.warn('Using mock data - useMockData:', this.useMockData, 'canvas:', !!canvas);
             return {
                 quaternion: [0, 0, 0, 1],
                 euler: [0, 0, 0]
@@ -129,6 +130,7 @@ export class InferenceManager {
         try {
             const width = canvas.width;
             const height = canvas.height;
+            //console.log('Running inference on canvas:', width, 'x', height);
 
             // Draw WebGL canvas onto 2D canvas
             const tempCanvas = document.createElement('canvas');
@@ -136,6 +138,17 @@ export class InferenceManager {
             tempCanvas.height = height;
             const tempCtx = tempCanvas.getContext('2d');
             tempCtx.drawImage(canvas, 0, 0, width, height);
+
+            // Debug: Save image if requested
+            if (window.saveNextInferenceImage) {
+                window.saveNextInferenceImage = false;
+                const link = document.createElement('a');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                link.download = `inference_debug_${timestamp}.png`;
+                link.href = tempCanvas.toDataURL('image/png');
+                link.click();
+                console.log('📸 Saved DEBUG inference image:', link.download);
+            }
 
             const imageData = tempCtx.getImageData(0, 0, width, height);
 
@@ -149,12 +162,16 @@ export class InferenceManager {
 
             const output = results.output.data;
             const quaternion = Array.from(output.slice(0, 4));
+            //console.log('Raw model output (XYZW):', quaternion);
+
             const normalized = this.normalizeQuaternion(quaternion);
+            //console.log('Normalized quaternion:', normalized);
 
             // -----------------------------
             // CONVERT BLENDER → THREE.JS
             // -----------------------------
             const threeQuat = this.blenderToThreeJSQuat(normalized);
+            //console.log('Converted to Three.js:', threeQuat);
 
             const euler = this.quaternionToEuler(threeQuat);
 
