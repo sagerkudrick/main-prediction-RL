@@ -678,9 +678,9 @@
 
                 // Multiply to rotate the original quaternion
                 qOrig.multiply(qY180); // or qOrig.multiply(qY180); depending on order
+                //console.log(qY180["_x"], qY180["_y"], qY180["_z"], qY180["_w"])
 
-
-                predictionCrate.quaternion.set(qOrig);
+                predictionCrate.quaternion.set(qOrig["_x"], qOrig["_y"], qOrig["_z"], qOrig["_w"]);
             } else {
                 console.warn('⚠️ predictionCrate not initialized yet');
             }
