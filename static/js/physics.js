@@ -174,13 +174,13 @@ export class PhysicsSimulation {
 
         // Default action
         const action = this.currentAction || new THREE.Vector3(0, 0, 0);
-
+        const magnitude = 2.8;
         for (let i = 0; i < numSteps; i++) {
             // Convert action to torque vector, scaled for control
             const torque = new CANNON.Vec3(
-                action.x * 10.0,
-                action.y * 10.0,
-                action.z * 10.0
+                action.x * magnitude,
+                action.y * magnitude,
+                action.z * magnitude
             );
 
             // Apply torque in local frame (LINK_FRAME equivalent)

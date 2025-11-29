@@ -151,7 +151,7 @@ export class SimulationController {
         }
         try {
             // Canonicalize predicted quaternion for consistent RL observations
-            const predQuat = InferenceManager.canonicalizeQuaternion(this.physics.predictedQuaternion);
+            const predQuat = this.physics.normalizeAndCanonicalizeQuaternion(this.physics.predictedQuaternion);
             // Compute z-axis from predicted quaternion
             const cannonQuat = { x: predQuat[0], y: predQuat[1], z: predQuat[2], w: predQuat[3] };
             const zAxis = this.physics.quaternionToZAxis(cannonQuat);
