@@ -169,34 +169,34 @@ export class PhysicsSimulation {
     /**
      * Step the physics simulation
      */
-step(numSteps = 4) {
-    const timeStep = 1.0 / 240.0; // Match PyBullet timestep
+    step(numSteps = 4) {
+        const timeStep = 1.0 / 240.0; // Match PyBullet timestep
 
-    // Default action
-    const action = this.currentAction || new THREE.Vector3(0, 0, 0);
+        // Default action
+        const action = this.currentAction || new THREE.Vector3(0, 0, 0);
 
-    for (let i = 0; i < numSteps; i++) {
-        // Convert action to torque vector, scaled for control
-        const torque = new CANNON.Vec3(
-            action.x * 10.0,
-            action.y * 10.0,
-            action.z * 10.0
-        );
+        for (let i = 0; i < numSteps; i++) {
+            // Convert action to torque vector, scaled for control
+            const torque = new CANNON.Vec3(
+                action.x * 10.0,
+                action.y * 10.0,
+                action.z * 10.0
+            );
 
-        // Apply torque in local frame (LINK_FRAME equivalent)
-        const worldTorque = new CANNON.Vec3();
-        this.boxBody.quaternion.vmult(torque, worldTorque);
+            // Apply torque in local frame (LINK_FRAME equivalent)
+            const worldTorque = new CANNON.Vec3();
+            this.boxBody.quaternion.vmult(torque, worldTorque);
 
-        // Incrementally add torque
-        this.boxBody.torque.vadd(worldTorque, this.boxBody.torque);
+            // Incrementally add torque
+            this.boxBody.torque.vadd(worldTorque, this.boxBody.torque);
 
-        // Step physics
-        this.world.step(timeStep);
-        this.stepCount++;
+            // Step physics
+            this.world.step(timeStep);
+            this.stepCount++;
+        }
+
+        return this.getState();
     }
-
-    return this.getState();
-}
 
     /**
      * Get current physics state
@@ -205,13 +205,13 @@ step(numSteps = 4) {
         const pos = this.boxBody.position;
         const quat = this.boxBody.quaternion;
         const angVel = this.boxBody.angularVelocity;
-
+        // Canonicalize quaternion for consistent sign
+        const canonicalQuat = this.normalizeAndCanonicalizeQuaternion([quat.x, quat.y, quat.z, quat.w]);
         // Check termination (matching PyBullet logic)
         const terminated = this.stepCount >= 500 || pos.y < 0.05;
-
         return {
             position: [pos.x, pos.y, pos.z],
-            quaternion: [quat.x, quat.y, quat.z, quat.w],
+            quaternion: canonicalQuat,  // Use canonical quaternion
             angular_velocity: [angVel.x, angVel.y, angVel.z],
             step_count: this.stepCount,
             terminated: terminated,
@@ -406,6 +406,14 @@ step(numSteps = 4) {
         return [q[0] / norm, q[1] / norm, q[2] / norm, q[3] / norm];
     }
 
+    normalizeAndCanonicalizeQuaternion(q) {
+        const normalized = this.normalizeQuaternion(q);
+        if (normalized[3] < 0 || (normalized[3] === 0 && normalized[0] < 0)) {
+            return [-normalized[0], -normalized[1], -normalized[2], -normalized[3]];
+        }
+        return normalized;
+    }
+
     /**
      * Convert quaternion to z-axis vector
      */
@@ -424,19 +432,19 @@ step(numSteps = 4) {
     /**
      * Convert z-axis to one-hot orientation (matching training)
      */
-zAxisToOrientationOneHot(zAxis) {
-    const threshold = 0.7;
-    const orientation = [0, 0, 0, 0, 0, 0];
+    zAxisToOrientationOneHot(zAxis) {
+        const threshold = 0.7;
+        const orientation = [0, 0, 0, 0, 0, 0];
 
-    if (zAxis[2] > threshold) orientation[0] = 1;
-    else if (zAxis[2] < -threshold) orientation[1] = 1;
-    else if (zAxis[0] > threshold) orientation[3] = 1;
-    else if (zAxis[0] < -threshold) orientation[2] = 1;
-    else if (zAxis[1] > threshold) orientation[4] = 1;
-    else if (zAxis[1] < -threshold) orientation[5] = 1;
+        if (zAxis[2] > threshold) orientation[0] = 1;
+        else if (zAxis[2] < -threshold) orientation[1] = 1;
+        else if (zAxis[0] > threshold) orientation[3] = 1;
+        else if (zAxis[0] < -threshold) orientation[2] = 1;
+        else if (zAxis[1] > threshold) orientation[4] = 1;
+        else if (zAxis[1] < -threshold) orientation[5] = 1;
 
-    return orientation; // length 6
-}
+        return orientation; // length 6
+    }
 
 
     /**

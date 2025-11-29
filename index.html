@@ -662,44 +662,6 @@
         };
 
 
-
-        simulation.onInferenceUpdate = (result) => {
-            const predQuat = result.quaternion; // In Three.js format [x,y,z,w]
-            //console.log('🔮 Inference update - predQuat (Three.js):', predQuat);
-            // Update predicted quat display with labels
-            document.getElementById('predicted-quat').textContent =
-                `x:${predQuat[0].toFixed(3)}, y:${predQuat[1].toFixed(3)}, z:${predQuat[2].toFixed(3)}, w:${predQuat[3].toFixed(3)}`;
-
-            const predEuler = quatToEulerDegrees(predQuat);
-            document.getElementById('pred-euler').textContent =
-                `[${predEuler.map(v => v.toFixed(1)).join(', ')}]`;
-
-            // Get actual quat from simulation loop
-            // Get actual quat from simulation loop and convert to Blender format
-
-            const actualQuat = simulation.lastQuaternion;
-            if (!actualQuat) {
-                console.warn("Actual quaternion not set yet.");
-                return;
-            }
-
-            // Angular distance (°)
-            const angle = quaternionAngularDistance(predQuat, actualQuat);
-            document.getElementById("quat-loss").textContent = angle.toFixed(2);
-
-            // Cosine loss
-            const cos = quatCosineLoss(predQuat, actualQuat);
-            document.getElementById("cos-loss").textContent = cos.toFixed(6);
-
-            // Update prediction crate orientation
-            if (predictionCrate) {
-                //console.log('📦 Updating prediction crate with quaternion:', predQuat);
-                predictionCrate.quaternion.set(predQuat[0], predQuat[1], predQuat[2], predQuat[3]);
-            } else {
-                console.warn('⚠️ predictionCrate not initialized yet');
-            }
-        };
-
         // Mouse interaction for ragdoll physics
         function getMouseWorldPoint(event) {
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;

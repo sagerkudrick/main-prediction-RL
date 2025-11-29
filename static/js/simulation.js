@@ -42,7 +42,7 @@ export class SimulationController {
         }
     }
 
-    
+
     /**
      * Start the simulation loop
      */
@@ -140,48 +140,47 @@ export class SimulationController {
     /**
      * Predict RL action and apply to physics
      */
-/**
-     * Predict RL action and apply to physics
-     * Uses PREDICTED quaternion from inference (not actual physics state)
-     */
-async predictAndApplyAction() {
-    if (!this.physics.predictedQuaternion) {
-        this.physics.setAction([0, 0, 0]);
-        return;
-    }
-
-    try {
-        const predQuat = this.physics.predictedQuaternion;
-
-        // Compute z-axis from predicted quaternion
-        const cannonQuat = { x: predQuat[0], y: predQuat[1], z: predQuat[2], w: predQuat[3] };
-        const zAxis = this.physics.quaternionToZAxis(cannonQuat);
-
-        // Compute orientation one-hot from predicted z-axis
-        const orientation = this.physics.zAxisToOrientationOneHot(zAxis);
-
-        // Construct observation (length 13)
-        const observation = [
-            predQuat[0], predQuat[1], predQuat[2], predQuat[3], // 4
-            zAxis[0], zAxis[1], zAxis[2],                      // 3
-            ...orientation                                      // 6
-        ];
-        console.log('Observation length:', observation.length);
-        console.log('Observation length:', observation);
-        // DEBUG: log length
-        if (this.frameCount % 60 === 0) {
-            console.log('Observation length:', observation.length); // should be 13
-            console.log('Observation:', observation);
+    /**
+         * Predict RL action and apply to physics
+         * Uses PREDICTED quaternion from inference (not actual physics state)
+         */
+    async predictAndApplyAction() {
+        if (!this.physics.predictedQuaternion) {
+            this.physics.setAction([0, 0, 0]);
+            return;
         }
+        try {
+            // Canonicalize predicted quaternion for consistent RL observations
+            const predQuat = InferenceManager.canonicalizeQuaternion(this.physics.predictedQuaternion);
+            // Compute z-axis from predicted quaternion
+            const cannonQuat = { x: predQuat[0], y: predQuat[1], z: predQuat[2], w: predQuat[3] };
+            const zAxis = this.physics.quaternionToZAxis(cannonQuat);
 
-        const action = await this.inference.predictAction(observation);
-        this.physics.setAction(action);
+            // Compute orientation one-hot from predicted z-axis
+            const orientation = this.physics.zAxisToOrientationOneHot(zAxis);
 
-    } catch (error) {
-        console.error('RL action prediction error:', error);
-        this.physics.setAction([0, 0, 0]);
+            // Construct observation (length 13)
+            const observation = [
+                predQuat[0], predQuat[1], predQuat[2], predQuat[3], // 4
+                zAxis[0], zAxis[1], zAxis[2],                      // 3
+                ...orientation                                      // 6
+            ];
+            console.log('Observation length:', observation.length);
+            console.log('Observation length:', observation);
+            // DEBUG: log length
+            if (this.frameCount % 60 === 0) {
+                console.log('Observation length:', observation.length); // should be 13
+                console.log('Observation:', observation);
+            }
+
+            const action = await this.inference.predictAction(observation);
+            this.physics.setAction(action);
+
+        } catch (error) {
+            console.error('RL action prediction error:', error);
+            this.physics.setAction([0, 0, 0]);
+        }
     }
-}
 
 
     /**

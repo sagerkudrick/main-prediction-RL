@@ -145,9 +145,12 @@ export class InferenceManager {
             const normalized = this.normalizeQuaternion(modelQuat);
 
             // Convert Blender → Three.js with 180° Y rotation
+            // Convert Blender → Three.js with 180° Y rotation
             const threeQuat = this.blenderToThreeQuat(normalized);
+            // Canonicalize to ensure consistent sign
+            const canonical = InferenceManager.canonicalizeQuaternion(threeQuat);
+            return { quaternion: canonical };
 
-            return { quaternion: threeQuat };
         } catch (error) {
             console.error('Pose prediction error:', error);
             return { quaternion: [0, 0, 0, 1] };
@@ -161,16 +164,16 @@ export class InferenceManager {
      */
     blenderToThreeQuat(q) {
         const [x, y, z, w] = q;
-        
+
         // Create Three.js quaternion from Blender data
         const qOrig = new THREE.Quaternion(x, y, z, w);
-        
+
         // Apply 180° rotation around Y axis to fix model orientation
         const qY180 = new THREE.Quaternion();
         qY180.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-        
+
         qOrig.multiply(qY180);
-        
+
         return [qOrig.x, qOrig.y, qOrig.z, qOrig.w];
     }
 
@@ -178,12 +181,11 @@ export class InferenceManager {
      * Ensure quaternion represents the same rotation with consistent sign
      * (Handles q and -q ambiguity)
      */
-    canonicalizeQuaternion(q) {
-        // Prefer w > 0 (or x > 0 if w == 0) for consistent sign
+    static canonicalizeQuaternion(q) {
         if (q[3] < 0 || (q[3] === 0 && q[0] < 0)) {
             return [-q[0], -q[1], -q[2], -q[3]];
         }
-        return q;
+        return [q[0], q[1], q[2], q[3]];
     }
 
     async predictAction(observation) {
