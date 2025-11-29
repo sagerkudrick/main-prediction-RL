@@ -169,30 +169,34 @@ export class PhysicsSimulation {
     /**
      * Step the physics simulation
      */
-    step(numSteps = 4) {
-        const timeStep = 1.0 / 240.0; // Match PyBullet timestep
+step(numSteps = 4) {
+    const timeStep = 1.0 / 240.0; // Match PyBullet timestep
 
-        for (let i = 0; i < numSteps; i++) {
-            // Apply torque (scaled like PyBullet: action * 0.1)
-            // Apply torque (scaled up for better control)
-            const torque = new CANNON.Vec3(
-                this.currentAction.x * 10.0,
-                this.currentAction.y * 10.0,
-                this.currentAction.z * 10.0
-            );
+    // Default action
+    const action = this.currentAction || new THREE.Vector3(0, 0, 0);
 
-            // Apply torque in local frame (LINK_FRAME equivalent)
-            const worldTorque = new CANNON.Vec3();
-            this.boxBody.quaternion.vmult(torque, worldTorque);
-            this.boxBody.torque.copy(worldTorque);
+    for (let i = 0; i < numSteps; i++) {
+        // Convert action to torque vector, scaled for control
+        const torque = new CANNON.Vec3(
+            action.x * 10.0,
+            action.y * 10.0,
+            action.z * 10.0
+        );
 
-            // Step physics
-            this.world.step(timeStep);
-            this.stepCount++;
-        }
+        // Apply torque in local frame (LINK_FRAME equivalent)
+        const worldTorque = new CANNON.Vec3();
+        this.boxBody.quaternion.vmult(torque, worldTorque);
 
-        return this.getState();
+        // Incrementally add torque
+        this.boxBody.torque.vadd(worldTorque, this.boxBody.torque);
+
+        // Step physics
+        this.world.step(timeStep);
+        this.stepCount++;
     }
+
+    return this.getState();
+}
 
     /**
      * Get current physics state
@@ -420,26 +424,20 @@ export class PhysicsSimulation {
     /**
      * Convert z-axis to one-hot orientation (matching training)
      */
-    zAxisToOrientationOneHot(zAxis) {
-        const threshold = 0.7;
-        const orientation = [0, 0, 0, 0, 0, 0];
+zAxisToOrientationOneHot(zAxis) {
+    const threshold = 0.7;
+    const orientation = [0, 0, 0, 0, 0, 0];
 
-        if (zAxis[2] > threshold) {
-            orientation[0] = 1; // up
-        } else if (zAxis[2] < -threshold) {
-            orientation[1] = 1; // down
-        } else if (zAxis[0] > threshold) {
-            orientation[3] = 1; // right
-        } else if (zAxis[0] < -threshold) {
-            orientation[2] = 1; // left
-        } else if (zAxis[1] > threshold) {
-            orientation[4] = 1; // forward
-        } else if (zAxis[1] < -threshold) {
-            orientation[5] = 1; // back
-        }
+    if (zAxis[2] > threshold) orientation[0] = 1;
+    else if (zAxis[2] < -threshold) orientation[1] = 1;
+    else if (zAxis[0] > threshold) orientation[3] = 1;
+    else if (zAxis[0] < -threshold) orientation[2] = 1;
+    else if (zAxis[1] > threshold) orientation[4] = 1;
+    else if (zAxis[1] < -threshold) orientation[5] = 1;
 
-        return orientation;
-    }
+    return orientation; // length 6
+}
+
 
     /**
      * Cleanup

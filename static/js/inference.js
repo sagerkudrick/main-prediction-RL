@@ -31,7 +31,7 @@ export class InferenceManager {
                 throw new Error('ONNX Runtime not loaded.');
             }
 
-            const providers = ['webgl'];
+            const providers = ['webgpu', 'webgl', 'cpu', 'wasm'];
 
             // Load pose model
             console.log('  Loading pose model...');
@@ -65,7 +65,7 @@ export class InferenceManager {
             for (const provider of providers) {
                 try {
                     console.log(`    Trying ${provider} backend...`);
-                    this.rlSession = await ort.InferenceSession.create('static/models/rl_policy.onnx', {
+                    this.rlSession = await ort.InferenceSession.create('static/models/rl-model.onnx', {
                         executionProviders: [provider],
                         graphOptimizationLevel: 'basic'
                     });
@@ -196,10 +196,10 @@ export class InferenceManager {
         }
 
         try {
-            const inputTensor = new ort.Tensor('float32', new Float32Array(observation), [1, 16]);
-            const feeds = { observation: inputTensor };
+            const inputTensor = new ort.Tensor('float32', new Float32Array(observation), [1, 13]);
+            const feeds = { input: inputTensor };
             const results = await this.rlSession.run(feeds);
-            const output = results.action.data;
+            const output = results.actions.data;
             return Array.from(output.slice(0, 3));
         } catch (error) {
             console.error('RL action prediction error:', error);
