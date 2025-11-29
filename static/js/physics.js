@@ -223,7 +223,7 @@ export class PhysicsSimulation {
      * Get observation for RL model (matching PyBullet format)
      */
     getObservation() {
-        const quat = this.boxBody.quaternion;
+        const quat = this.predictedQuaternion;
         const angVel = this.boxBody.angularVelocity;
 
         // Compute z-axis from quaternion
