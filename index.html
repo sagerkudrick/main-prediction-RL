@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="static/css/style.css">
 
     <!-- ONNX Runtime Web -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"></script>
 
     <!-- Three.js Import Map -->
     <script type="importmap">
@@ -16,7 +15,7 @@
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js",
             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/",
-            "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.min.js"
+            "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.min.js"
         }
     }
     </script>
@@ -136,8 +135,9 @@
             console.error('Unhandled rejection:', event.reason);
         });
     </script>
-
+<script src="https://unpkg.com/onnxruntime-web/dist/ort.webgpu.min.js"></script> 
     <script type="module">
+        
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -147,7 +147,6 @@
         import { addLightHelper } from './static/js/light-helpers.js';
 
         const INFERENCE_INTERVAL = 5;
-
         let scene, camera, renderer, controls;
         let crateMesh, inferenceCrate, predictionCrate, wallGroup;
         let inferenceCanvas, inferenceRenderer, inferenceScene, inferenceCamera;
@@ -155,6 +154,21 @@
         let raycaster, mouse;
         let isDragging = false;
         let debugMesh;
+
+        function updateIORAndTransmission(mesh, ior = 1.5, transmission = 1.0) {
+            mesh.traverse(node => {
+                if (node.isMesh) {
+                    const mat = node.material;
+                    if (mat && mat.isMeshPhysicalMaterial) {
+                        mat.ior = ior;                 // e.g., 1.5 for glass
+                        mat.transmission = transmission; // 0..1
+                        mat.transparent = true;        // make sure it's transparent
+                        mat.needsUpdate = true;        // tell Three.js to recompile shader
+                    }
+                }
+            });
+        }
+
 
         const simulation = new SimulationController();
 
@@ -216,7 +230,7 @@
             controls.target.set(0, 0.3, 0);
 
             // Lights
-            scene.add(new THREE.AmbientLight(0x404040, 2));
+            scene.add(new THREE.AmbientLight(0x404040, 5));
             const dirLight = new THREE.DirectionalLight(0xffffff, 3);
             dirLight.position.set(5, 10, 5);
             dirLight.castShadow = true;
@@ -254,7 +268,7 @@
             inferenceScene.background = new THREE.Color(0xffffff);
 
             inferenceCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-            inferenceCamera.position.set(0, 0, 3);
+            inferenceCamera.position.set(0, 0, 3.5);
             inferenceCamera.lookAt(0, 0, 0);
 
             window.inferenceCamera = inferenceCamera; // for debugging
@@ -315,7 +329,7 @@
             predictionScene.background = new THREE.Color(0xffffff);
 
             predictionCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-            predictionCamera.position.set(0, 0, 3.5);
+            predictionCamera.position.set(0, 0, 5.5);
             predictionCamera.lookAt(0, 0, 0);
 
             predictionCanvas = document.getElementById('prediction-image');
@@ -401,7 +415,7 @@
         // Load GLB model
         function loadModel() {
             const loader = new GLTFLoader();
-            loader.load('static/models/isotopebox.glb', (gltf) => {
+            loader.load('static/models/engine.glb', (gltf) => {
                 if (crateMesh) scene.remove(crateMesh);
                 crateMesh = gltf.scene;
                 window.crateMesh = crateMesh; // for debugging
@@ -411,20 +425,6 @@
                 const size = new THREE.Vector3();
                 box.getSize(size);
                 const center = new THREE.Vector3();
-                box.getCenter(center);
-
-                // 2. Center the geometry
-                crateMesh.traverse(node => {
-                    if (node.isMesh) {
-                        node.geometry.translate(-center.x, -center.y, -center.z);
-                    }
-                });
-                crateMesh.rotation.y = Math.PI;
-                // Update world matrix after centering
-                crateMesh.updateMatrixWorld(true);
-
-                console.log(`Model loaded. Size: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`);
-
                 // 3. Extract and merge ALL geometry for physics
                 const allVertices = [];
                 const allIndices = [];
@@ -511,22 +511,24 @@
                     }
                 });
                 // Apply the base rotation to the group instead
-                inferenceCrate.rotation.y = Math.PI;
                 inferenceScene.add(inferenceCrate);
 
                 // 5. Create prediction crate - DON'T copy child rotations!
                 predictionCrate = new THREE.Group();
+
+                window.predictionCrate = predictionCrate; // for debugging
+
                 crateMesh.traverse(node => {
                     if (node.isMesh) {
                         const clone = new THREE.Mesh(node.geometry.clone(), node.material.clone());
                         clone.position.copy(node.position);
                         // DON'T copy rotation - let parent group control it
+
                         clone.scale.copy(node.scale);
                         predictionCrate.add(clone);
                     }
                 });
                 // Apply the base rotation to the group instead
-                predictionCrate.rotation.y = Math.PI;
                 predictionScene.add(predictionCrate);
             });
         }

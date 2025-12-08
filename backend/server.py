@@ -13,3 +13,5 @@ def serve_static(path):
 if __name__ == '__main__':
     print("Starting static file server at http://localhost:8000")
     app.run(port=8000, debug=True)
+
+

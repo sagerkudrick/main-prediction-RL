@@ -174,7 +174,7 @@ export class PhysicsSimulation {
 
         // Default action
         const action = this.currentAction || new THREE.Vector3(0, 0, 0);
-        const magnitude = 2.8;
+        const magnitude = 3;
         for (let i = 0; i < numSteps; i++) {
             // Convert action to torque vector, scaled for control
             const torque = new CANNON.Vec3(
