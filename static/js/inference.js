@@ -21,10 +21,24 @@ export class InferenceManager {
 
         // Async mutex for serialized runs
         this._runLock = Promise.resolve();
-
+        this._lastQuaternion = [0, 0, 0, 1]; // initial
+        this._smoothingFactor = 0.8; // higher = smoother
         // Timing info
         this._lastPoseMs = 0;
         this._lastRlMs = 0;
+    }
+
+  smoothQuaternion(newQ) {
+        const lastQ = this._lastQuaternion;
+
+        // Handle sign ambiguity (q and -q are equivalent)
+        let dot = lastQ[0]*newQ[0] + lastQ[1]*newQ[1] + lastQ[2]*newQ[2] + lastQ[3]*newQ[3];
+        const correctedQ = dot < 0 ? newQ.map(v => -v) : newQ;
+
+        const smoothed = lastQ.map((v, i) => this._smoothingFactor * v + (1 - this._smoothingFactor) * correctedQ[i]);
+        const norm = Math.sqrt(smoothed.reduce((a,b)=>a+b*b,0));
+        this._lastQuaternion = smoothed.map(v => v / norm);
+        return this._lastQuaternion;
     }
 
     async _withRunLock(fn) {
@@ -64,7 +78,7 @@ export class InferenceManager {
                 try {
                     console.log(`    Trying ${provider} backend...`);
 
-                    const response = await fetch('http://69.197.134.3:8081/models/pose_model_best.onnx');
+                    const response = await fetch('http://69.197.134.3:8081/models/pose_model_final.onnx');
                     if (!response.ok) throw new Error('Failed to fetch model');
 
                     const arrayBuffer = await response.arrayBuffer();
@@ -149,7 +163,6 @@ async predictPose(rendererOrCanvas) {
     const mean = [0.485, 0.456, 0.406];
     const std = [0.229, 0.224, 0.225];
 
-    // Fill channel-first tensor with normalized values
     for (let i = 0; i < this._targetH; i++) {
         for (let j = 0; j < this._targetW; j++) {
             const idx = (i * this._targetW + j) * 4;
@@ -175,9 +188,30 @@ async predictPose(rendererOrCanvas) {
         return r;
     });
 
-    const output = Array.from(result.output.data.slice(0, 4));
-    return { quaternion: this.normalizeQuaternion(output) };
+    // Normalize raw quaternion
+    let rawQ = Array.from(result.output.data.slice(0, 4));
+    let normQ = this.normalizeQuaternion(rawQ);
+
+    // Initialize last quaternion if undefined
+    if (!this._lastQuaternion) this._lastQuaternion = [0, 0, 0, 1];
+
+    // Correct sign ambiguity (q vs -q)
+    let dot = this._lastQuaternion[0]*normQ[0] + this._lastQuaternion[1]*normQ[1] + this._lastQuaternion[2]*normQ[2] + this._lastQuaternion[3]*normQ[3];
+    if (dot < 0) normQ = normQ.map(v => -v);
+
+    // EMA smoothing
+    const alpha = 0.8; // smoothing factor (higher = smoother)
+    const smoothedQ = this._lastQuaternion.map((v, i) => alpha * v + (1 - alpha) * normQ[i]);
+
+    // Normalize smoothed quaternion
+    const norm = Math.sqrt(smoothedQ.reduce((acc, v) => acc + v*v, 0));
+    const finalQ = smoothedQ.map(v => v / norm);
+
+    this._lastQuaternion = finalQ;
+
+    return { quaternion: finalQ };
 }
+
 
     async predictAction(observation) {
         if (!this.isReady) throw new Error('Models not loaded yet');
