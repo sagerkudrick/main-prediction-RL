@@ -5,6 +5,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Isotope Box RL - Client Side</title>
+    <style>
+        .status-text {
+            font-size: 0.8em;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .status-text.success {
+            color: #4caf50;
+        }
+
+        .button.secondary {
+            background-color: #666;
+        }
+
+        .button.secondary:hover {
+            background-color: #777;
+        }
+    </style>
     <link rel="stylesheet" href="static/css/style.css">
 
     <!-- ONNX Runtime Web -->
@@ -50,6 +69,11 @@
         <div class="control-group">
             <label>Wall Size: <span id="wall-size-val">1.0</span>m</label>
             <input type="range" id="wall-size-slider" min="0.5" max="5.0" step="0.1" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <button id="select-folder-btn" class="button secondary">📂 Select Output Folder</button>
+            <div id="folder-status" class="status-text">No folder selected</div>
         </div>
 
         <button id="save-inference-btn" class="button">💾 Save Inference Image</button>
@@ -135,9 +159,9 @@
             console.error('Unhandled rejection:', event.reason);
         });
     </script>
-<script src="https://unpkg.com/onnxruntime-web/dist/ort.webgpu.min.js"></script> 
+    <script src="https://unpkg.com/onnxruntime-web/dist/ort.webgpu.min.js"></script>
     <script type="module">
-        
+
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -589,13 +613,13 @@
             window.saveNextInferenceImage = true;
         });
 
+        document.getElementById('select-folder-btn').addEventListener('click', selectOutputFolder);
+
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-
 
         // Simulation callbacks
         simulation.onStateUpdate = (state) => {
@@ -639,6 +663,8 @@
 
             // Canonicalize both quaternions for consistent sign comparison
             const predCanonical = canonicalizeQuaternion(predQuat);
+
+            if (!simulation.lastQuaternion) return; // Wait for first physics update
             const actualCanonical = canonicalizeQuaternion(simulation.lastQuaternion);
 
             // Display predicted quaternion
@@ -657,12 +683,69 @@
             const cos = quatCosineLoss(predCanonical, actualCanonical);
             document.getElementById("cos-loss").textContent = cos.toFixed(6);
 
+            const cos_loss = cos.toFixed(6)
+
+            if (cos_loss > 0.036 && cos_loss != NaN) {
+                console.log("High Cosine Loss Detected:", cos_loss);
+                const timestamp = Date.now();
+                const filename = `cam_w${actualCanonical[3].toFixed(3)}_x${actualCanonical[0].toFixed(3)}_y${actualCanonical[1].toFixed(3)}_z${actualCanonical[2].toFixed(3)}_${timestamp}.jpg`;
+                console.log("filename: ", filename)
+                //saveInferenceImage(filename)
+            }
+
             // Update prediction crate with canonical quaternion
             if (predictionCrate) {
                 predictionCrate.quaternion.set(predCanonical[0], predCanonical[1], predCanonical[2], predCanonical[3]);
             }
         };
 
+        let directoryHandle = null;
+
+        async function selectOutputFolder() {
+            try {
+                directoryHandle = await window.showDirectoryPicker();
+                document.getElementById('folder-status').textContent = 'Folder selected: ' + directoryHandle.name;
+                document.getElementById('folder-status').classList.add('success');
+            } catch (err) {
+                console.error('Error selecting folder:', err);
+            }
+        }
+
+        async function saveInferenceImage(filename) {
+            // DO NOT re-render here. The canvas already contains the frame used for inference.
+            // Re-rendering might capture a different state if logic changes or if async delays occur.
+            // inferenceRenderer.render(inferenceScene, inferenceCamera);
+
+            const canvas = inferenceRenderer.domElement;
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+
+            if (directoryHandle) {
+                try {
+                    // Save directly to folder
+                    const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                    console.log('Saved to folder:', filename);
+                } catch (err) {
+                    console.error('Error saving to folder:', err);
+                    // Fallback to download if saving fails
+                    downloadImage(blob, filename);
+                }
+            } else {
+                // Fallback to download
+                downloadImage(blob, filename);
+            }
+        }
+
+        function downloadImage(blob, filename) {
+            const dataURL = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = filename || 'inference.jpg';
+            link.click();
+            URL.revokeObjectURL(dataURL);
+        }
 
         // Mouse interaction for ragdoll physics
         function getMouseWorldPoint(event) {

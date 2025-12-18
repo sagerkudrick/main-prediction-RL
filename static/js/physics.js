@@ -18,6 +18,8 @@ export class PhysicsSimulation {
         this.predictedQuaternion = null;
         this.boxSize = new CANNON.Vec3(0.1, 0.1, 0.1); // Default half-extents
         this.meshData = null; // Stores { vertices, faces } for ConvexPolyhedron
+        this._gravity = -2; // Match PyBullet gravity
+        this.magnitude = 1;
     }
 
     /**
@@ -26,7 +28,7 @@ export class PhysicsSimulation {
     start() {
         // Create physics world
         this.world = new CANNON.World();
-        this.world.gravity.set(0, -9.81, 0); // Match PyBullet gravity
+        this.world.gravity.set(0, this._gravity, 0); // Match PyBullet gravity
 
         // Set timestep to match PyBullet (1/240 seconds)
         this.world.defaultContactMaterial.contactEquationStiffness = 1e7;
@@ -174,13 +176,13 @@ export class PhysicsSimulation {
 
         // Default action
         const action = this.currentAction || new THREE.Vector3(0, 0, 0);
-        const magnitude = 3;
+        
         for (let i = 0; i < numSteps; i++) {
             // Convert action to torque vector, scaled for control
             const torque = new CANNON.Vec3(
-                action.x * magnitude,
-                action.y * magnitude,
-                action.z * magnitude
+                action.x * this.magnitude,
+                action.y * this.magnitude,
+                action.z * this.magnitude
             );
 
             // Apply torque in local frame (LINK_FRAME equivalent)

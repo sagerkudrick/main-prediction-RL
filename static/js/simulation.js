@@ -19,6 +19,17 @@ export class SimulationController {
         // Callbacks for UI updates
         this.onStateUpdate = null;
         this.onInferenceUpdate = null;
+
+                // In constructor
+        this.oriHistory = [
+            [0, 0, 0, 1],  // quat from 2 frames ago (identity)
+            [0, 0, 0, 1]   // quat from 1 frame ago
+        ];
+        this.actionHistory = [
+            [0, 0, 0],     // action from 2 frames ago
+            [0, 0, 0]      // action from 1 frame ago
+        ];
+
     }
 
     /**
@@ -27,6 +38,8 @@ export class SimulationController {
     async initialize() {
         console.log('Initializing simulation...');
 
+
+        
         try {
             // Load ONNX models
             await this.inference.loadModels();
@@ -157,24 +170,37 @@ export class SimulationController {
             const zAxis = this.physics.quaternionToZAxis(cannonQuat);
 
             // Compute orientation one-hot from predicted z-axis
-            const orientation = this.physics.zAxisToOrientationOneHot(zAxis);
-
-            // Construct observation (length 13)
-            const observation = [
-                predQuat[0], predQuat[1], predQuat[2], predQuat[3], // 4
-                zAxis[0], zAxis[1], zAxis[2],                      // 3
-                ...orientation                                      // 6
+            const prevQuat = this.oriHistory[1];
+            const angVelEst = [
+                predQuat[0] - prevQuat[0],
+                predQuat[1] - prevQuat[1],
+                predQuat[2] - prevQuat[2]
             ];
-            console.log('Observation length:', observation.length);
-            console.log('Observation length:', observation);
-            // DEBUG: log length
+
+            // Construct observation (length 23)
+            const observation = [
+                predQuat[0], predQuat[1], predQuat[2], predQuat[3], // 4 - current quat
+                zAxis[0], zAxis[1], zAxis[2],                       // 3 - current z-axis
+                zAxis[0], zAxis[1], zAxis[2],                       // 3 - z-axis (same)
+                ...this.oriHistory[0],                              // 4 - quat from 2 frames ago
+                angVelEst[0], angVelEst[1], angVelEst[2],           // 3 - angular velocity estimate (from quat diff)
+                ...this.actionHistory[0],                           // 3 - action from 2 frames ago
+                ...this.actionHistory[1]                            // 3 - action from 1 frame ago
+            ];
+            
             if (this.frameCount % 60 === 0) {
-                console.log('Observation length:', observation.length); // should be 13
+                console.log('Observation length:', observation.length); // should be 27
                 console.log('Observation:', observation);
             }
 
             const action = await this.inference.predictAction(observation);
             this.physics.setAction(action);
+
+            // Update history for next frame
+            this.oriHistory[0] = this.oriHistory[1];
+            this.oriHistory[1] = [...predQuat];
+            this.actionHistory[0] = this.actionHistory[1];
+            this.actionHistory[1] = [...action];
 
         } catch (error) {
             console.error('RL action prediction error:', error);

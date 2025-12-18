@@ -22,21 +22,21 @@ export class InferenceManager {
         // Async mutex for serialized runs
         this._runLock = Promise.resolve();
         this._lastQuaternion = [0, 0, 0, 1]; // initial
-        this._smoothingFactor = 0.8; // higher = smoother
+        this._smoothingFactor = 0.4; // higher = smoother
         // Timing info
         this._lastPoseMs = 0;
         this._lastRlMs = 0;
     }
 
-  smoothQuaternion(newQ) {
+    smoothQuaternion(newQ) {
         const lastQ = this._lastQuaternion;
 
         // Handle sign ambiguity (q and -q are equivalent)
-        let dot = lastQ[0]*newQ[0] + lastQ[1]*newQ[1] + lastQ[2]*newQ[2] + lastQ[3]*newQ[3];
+        let dot = lastQ[0] * newQ[0] + lastQ[1] * newQ[1] + lastQ[2] * newQ[2] + lastQ[3] * newQ[3];
         const correctedQ = dot < 0 ? newQ.map(v => -v) : newQ;
 
         const smoothed = lastQ.map((v, i) => this._smoothingFactor * v + (1 - this._smoothingFactor) * correctedQ[i]);
-        const norm = Math.sqrt(smoothed.reduce((a,b)=>a+b*b,0));
+        const norm = Math.sqrt(smoothed.reduce((a, b) => a + b * b, 0));
         this._lastQuaternion = smoothed.map(v => v / norm);
         return this._lastQuaternion;
     }
@@ -70,7 +70,7 @@ export class InferenceManager {
 
             const providers = ['webgpu']; // Force WebGPU
 
-            
+
             // Load Pose model
             console.log('  Loading pose model...');
             let poseLoaded = false;
@@ -141,77 +141,76 @@ export class InferenceManager {
         }
     }
 
-async predictPose(rendererOrCanvas) {
-    if (!this.isReady) throw new Error('Models not loaded yet');
-    if (this.useMockData) return { quaternion: [0, 0, 0, 1] };
+    async predictPose(rendererOrCanvas) {
+        if (!this.isReady) throw new Error('Models not loaded yet');
+        if (this.useMockData) return { quaternion: [0, 0, 0, 1] };
 
-    const sourceCanvas = rendererOrCanvas?.domElement || rendererOrCanvas;
-    if (!sourceCanvas) return { quaternion: [0, 0, 0, 1] };
+        const sourceCanvas = rendererOrCanvas?.domElement || rendererOrCanvas;
+        if (!sourceCanvas) return { quaternion: [0, 0, 0, 1] };
 
-    // Draw into preallocated canvas
-    const w = sourceCanvas.width;
-    const h = sourceCanvas.height;
-    this._preprocCanvas.width = this._targetW;
-    this._preprocCanvas.height = this._targetH;
-    this._preprocCtx.drawImage(sourceCanvas, 0, 0, w, h, 0, 0, this._targetW, this._targetH);
+        // Draw into preallocated canvas
+        const w = sourceCanvas.width;
+        const h = sourceCanvas.height;
+        this._preprocCanvas.width = this._targetW;
+        this._preprocCanvas.height = this._targetH;
+        this._preprocCtx.drawImage(sourceCanvas, 0, 0, w, h, 0, 0, this._targetW, this._targetH);
 
-    const imageData = this._preprocCtx.getImageData(0, 0, this._targetW, this._targetH);
-    const pixels = imageData.data;
-    const tensor = this._tensorBuffer;
+        const imageData = this._preprocCtx.getImageData(0, 0, this._targetW, this._targetH);
+        const pixels = imageData.data;
+        const tensor = this._tensorBuffer;
 
-    // ImageNet normalization
-    const mean = [0.485, 0.456, 0.406];
-    const std = [0.229, 0.224, 0.225];
+        // ImageNet normalization
+        const mean = [0.485, 0.456, 0.406];
+        const std = [0.229, 0.224, 0.225];
 
-    for (let i = 0; i < this._targetH; i++) {
-        for (let j = 0; j < this._targetW; j++) {
-            const idx = (i * this._targetW + j) * 4;
-            const r = pixels[idx] / 255.0;
-            const g = pixels[idx + 1] / 255.0;
-            const b = pixels[idx + 2] / 255.0;
+        for (let i = 0; i < this._targetH; i++) {
+            for (let j = 0; j < this._targetW; j++) {
+                const idx = (i * this._targetW + j) * 4;
+                const r = pixels[idx] / 255.0;
+                const g = pixels[idx + 1] / 255.0;
+                const b = pixels[idx + 2] / 255.0;
 
-            tensor[0 * this._targetH * this._targetW + i * this._targetW + j] = (r - mean[0]) / std[0];
-            tensor[1 * this._targetH * this._targetW + i * this._targetW + j] = (g - mean[1]) / std[1];
-            tensor[2 * this._targetH * this._targetW + i * this._targetW + j] = (b - mean[2]) / std[2];
+                tensor[0 * this._targetH * this._targetW + i * this._targetW + j] = (r - mean[0]) / std[0];
+                tensor[1 * this._targetH * this._targetW + i * this._targetW + j] = (g - mean[1]) / std[1];
+                tensor[2 * this._targetH * this._targetW + i * this._targetW + j] = (b - mean[2]) / std[2];
+            }
         }
+
+        const inputTensor = new ort.Tensor('float32', tensor, [1, 3, this._targetH, this._targetW]);
+
+        // Serialized session.run
+        const result = await this._withRunLock(async () => {
+            const t0 = performance.now();
+            const feeds = { input: inputTensor };
+            const r = await this.poseSession.run(feeds);
+            const t1 = performance.now();
+            this._lastPoseMs = t1 - t0;
+            return r;
+        });
+
+        // Normalize raw quaternion
+        let rawQ = Array.from(result.output.data.slice(0, 4));
+        let normQ = this.normalizeQuaternion(rawQ);
+
+        // // Initialize last quaternion if undefined
+        // if (!this._lastQuaternion) this._lastQuaternion = [0, 0, 0, 1];
+
+        // // Correct sign ambiguity (q vs -q)
+        // let dot = this._lastQuaternion[0]*normQ[0] + this._lastQuaternion[1]*normQ[1] + this._lastQuaternion[2]*normQ[2] + this._lastQuaternion[3]*normQ[3];
+        // if (dot < 0) normQ = normQ.map(v => -v);
+
+        // // EMA smoothing
+        // const alpha = 0.8; // smoothing factor (higher = smoother)
+        // const smoothedQ = this._lastQuaternion.map((v, i) => alpha * v + (1 - alpha) * normQ[i]);
+
+        // // Normalize smoothed quaternion
+        // const norm = Math.sqrt(smoothedQ.reduce((acc, v) => acc + v*v, 0));
+        // const finalQ = smoothedQ.map(v => v / norm);
+
+        // this._lastQuaternion = finalQ;
+
+        return { quaternion: normQ };
     }
-
-    const inputTensor = new ort.Tensor('float32', tensor, [1, 3, this._targetH, this._targetW]);
-
-    // Serialized session.run
-    const result = await this._withRunLock(async () => {
-        const t0 = performance.now();
-        const feeds = { input: inputTensor };
-        const r = await this.poseSession.run(feeds);
-        const t1 = performance.now();
-        this._lastPoseMs = t1 - t0;
-        return r;
-    });
-
-    // Normalize raw quaternion
-    let rawQ = Array.from(result.output.data.slice(0, 4));
-    let normQ = this.normalizeQuaternion(rawQ);
-
-    // Initialize last quaternion if undefined
-    if (!this._lastQuaternion) this._lastQuaternion = [0, 0, 0, 1];
-
-    // Correct sign ambiguity (q vs -q)
-    let dot = this._lastQuaternion[0]*normQ[0] + this._lastQuaternion[1]*normQ[1] + this._lastQuaternion[2]*normQ[2] + this._lastQuaternion[3]*normQ[3];
-    if (dot < 0) normQ = normQ.map(v => -v);
-
-    // EMA smoothing
-    const alpha = 0.8; // smoothing factor (higher = smoother)
-    const smoothedQ = this._lastQuaternion.map((v, i) => alpha * v + (1 - alpha) * normQ[i]);
-
-    // Normalize smoothed quaternion
-    const norm = Math.sqrt(smoothedQ.reduce((acc, v) => acc + v*v, 0));
-    const finalQ = smoothedQ.map(v => v / norm);
-
-    this._lastQuaternion = finalQ;
-
-    return { quaternion: finalQ };
-}
-
 
     async predictAction(observation) {
         if (!this.isReady) throw new Error('Models not loaded yet');
@@ -220,7 +219,7 @@ async predictPose(rendererOrCanvas) {
         const floatObs = new Float32Array(observation);
 
         const result = await this._withRunLock(async () => {
-            const feeds = { input: new ort.Tensor('float32', floatObs, [1, 13]) };
+            const feeds = { input: new ort.Tensor('float32', floatObs, [1, 23]) };
             return await this.rlSession.run(feeds);
         });
 
