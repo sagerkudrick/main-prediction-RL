@@ -108,13 +108,13 @@ I trained a **reinforcement learning agent** to actively re-orient the object up
 
 **RL setup:**
 - Environment: physics-based 3D orientation task
-- Observation: predicted orientation + physics state
+- Observation: Noisy orientation (to generalize for loss in predicted quaternions in final product) + physics state
 - Action space: rotational torque
 - Objective: minimize angular error from upright pose
 
 **Result:**
-- The policy learns to flip and stabilize the object in real time
-- Policy generalizes across initial orientations
+- The policy learns to flip and stabilize the object in real time given noisy XYZW quaternions
+- Policy generalizes across initial, randomized orientations
 
 ---
 
