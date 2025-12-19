@@ -155,13 +155,14 @@ main-prediction-RL/
 │ ├── js/
 │ │ ├── physics.js # Cannon.js simulation
 │ │ ├── inference.js # ONNX inference
-│ │ └── simulation.js # Main loop
+│ │ ├── simulation.js # Main loop
+│ │ └── vis_torque.js # Draw RL actions onto model
 │ └── models/
-│ ├── pose_model.onnx
-│ └── rl_policy.onnx
+│ ├── pose_model.onnx # Model to predict quarternions from an image
+│ ├── engine.glb # 3D Engine model
+│ └── rl_policy.onnx # Reinforced learning policy for orientating our object
 └── backend/
-├── convert_models.py # PyTorch → ONNX
-└── training artifacts
+├── server.py # Backend to serve files
 ```
 
 
