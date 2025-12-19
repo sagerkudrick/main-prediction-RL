@@ -169,6 +169,7 @@
         import { InferenceManager } from './static/js/inference.js';
         import { SimulationController } from './static/js/simulation.js';
         import { addLightHelper } from './static/js/light-helpers.js';
+        import { VisualTorqueDebugger } from './static/js/vis_torque.js';
 
         const INFERENCE_INTERVAL = 5;
         let scene, camera, renderer, controls;
@@ -178,6 +179,7 @@
         let raycaster, mouse;
         let isDragging = false;
         let debugMesh;
+        let torqueDebugger;
 
         function updateIORAndTransmission(mesh, ior = 1.5, transmission = 1.0) {
             mesh.traverse(node => {
@@ -195,7 +197,8 @@
 
 
         const simulation = new SimulationController();
-
+        window.simulation = simulation;  // ← ADD THIS LINE
+        window.torqueDebugger = null;    // Will be set in loadModel
         // Loading overlay functions
         function updateLoadingStatus(message) {
             const el = document.getElementById('loading-status');
@@ -377,64 +380,7 @@
             predictionScene.add(predictionBottomLight);
         }
 
-        // Create visual walls matching physics
-        function createWalls(size) {
-            // Remove existing walls
-            if (wallGroup) {
-                scene.remove(wallGroup);
-            }
 
-            wallGroup = new THREE.Group();
-            const halfSize = size / 1.0;
-            const height = 0.5;
-            const thickness = 0.05;
-
-            const wallMaterial = new THREE.MeshStandardMaterial({
-                color: 0x667eea,
-                transparent: true,
-                opacity: 0.3
-            });
-
-            // North wall (Z-)
-            const northWall = new THREE.Mesh(
-                new THREE.BoxGeometry(halfSize * 2 + thickness * 2, height * 2, thickness * 2),
-                wallMaterial
-            );
-            northWall.position.set(0, height, -halfSize - thickness);
-            wallGroup.add(northWall);
-
-            // South wall (Z+)
-            const southWall = new THREE.Mesh(
-                new THREE.BoxGeometry(halfSize * 2 + thickness * 2, height * 2, thickness * 2),
-                wallMaterial
-            );
-            southWall.position.set(0, height, halfSize + thickness);
-            wallGroup.add(southWall);
-
-            // East wall (X+)
-            const eastWall = new THREE.Mesh(
-                new THREE.BoxGeometry(thickness * 2, height * 2, halfSize * 2),
-                wallMaterial
-            );
-            eastWall.position.set(halfSize + thickness, height, 0);
-            wallGroup.add(eastWall);
-
-            // West wall (X-)
-            const westWall = new THREE.Mesh(
-                new THREE.BoxGeometry(thickness * 2, height * 2, halfSize * 2),
-                wallMaterial
-            );
-            westWall.position.set(-halfSize - thickness, height, 0);
-            wallGroup.add(westWall);
-
-            scene.add(wallGroup);
-        }
-
-        // Update walls when size changes
-        function updateWalls(size) {
-            createWalls(size);
-            simulation.updateWalls(size);
-        }
 
         // Load GLB model
         function loadModel() {
@@ -442,6 +388,16 @@
             loader.load('static/models/engine.glb', (gltf) => {
                 if (crateMesh) scene.remove(crateMesh);
                 crateMesh = gltf.scene;
+                torqueDebugger = new VisualTorqueDebugger(scene, crateMesh);
+                window.torqueDebugger = torqueDebugger;
+
+                simulation.onTorqueUpdate = (torque) => {
+                    if (torqueDebugger) {
+                        torqueDebugger.updateTorque(torque[0], torque[1], torque[2]);
+                    }
+                };
+
+
                 window.crateMesh = crateMesh; // for debugging
 
                 // 1. Calculate bounding box
@@ -484,34 +440,9 @@
                 });
                 crateMesh.position.set(0, 1.5, 0);
 
-                if (allVertices.length > 0) {
-                    console.log(`Total merged mesh: ${allVertices.length / 3} vertices, ${allIndices.length / 3} triangles`);
-                    simulation.setMeshShape(allVertices, allIndices);
+                simulation.setMeshShape(allVertices, allIndices);
 
-                    // Create merged debug mesh
-                    if (debugMesh) scene.remove(debugMesh);
-                    const mergedGeo = new THREE.BufferGeometry();
-                    mergedGeo.setAttribute('position', new THREE.Float32BufferAttribute(allVertices, 3));
-                    mergedGeo.setIndex(allIndices);
-                    debugMesh = new THREE.Mesh(
-                        mergedGeo,
-                        new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
-                    );
-                    scene.add(debugMesh);
-                } else {
-                    console.warn('No mesh found for physics, falling back to box');
-                    simulation.setBoxSize(size.x / 2, size.y / 2, size.z / 2);
-
-                    // Fallback debug mesh
-                    if (debugMesh) scene.remove(debugMesh);
-                    debugMesh = new THREE.Mesh(
-                        new THREE.BoxGeometry(size.x, size.y, size.z),
-                        new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
-                    );
-                    scene.add(debugMesh);
-                }
-
-                const axes = new THREE.AxesHelper(5);
+                const axes = new THREE.AxesHelper(1.5);
                 crateMesh.add(axes);
 
                 crateMesh.scale.set(1.0, 1.0, 1.0);
@@ -625,6 +556,13 @@
         simulation.onStateUpdate = (state) => {
             crateMesh.position.set(...state.position);
             crateMesh.quaternion.set(...state.quaternion);
+
+            if (torqueDebugger && state.action) {
+                torqueDebugger.updateActionAxes(
+                    crateMesh.quaternion,
+                    state.action
+                );
+            }
 
             // Store for comparison - already in Three.js format
             simulation.lastQuaternion = state.quaternion;
@@ -806,9 +744,23 @@
             });
         }
 
+        // Fixed Time Step Logic
+        let lastTime = performance.now();
+        let accumulator = 0;
+        const FIXED_TIME_STEP = 1 / 60; // Simulate 60 physics steps per second (real-time)
+
         // Animation loop
         async function animate() {
             requestAnimationFrame(animate);
+
+            const now = performance.now();
+            let frameTime = (now - lastTime) / 1000; // Seconds
+            lastTime = now;
+
+            // Cap frameTime to prevent spiral of death if tab is backgrounded
+            if (frameTime > 0.25) frameTime = 0.25;
+
+            accumulator += frameTime;
 
             if (simulation.isRunning && inferenceCrate && predictionCrate) {
                 // Update inference crate to match current pose BEFORE rendering
@@ -826,13 +778,18 @@
                 // Render prediction scene
                 predictionRenderer.render(predictionScene, predictionCamera);
 
-                // Now run simulation step (which may capture the inference canvas)
-                await simulation.step(inferenceRenderer, INFERENCE_INTERVAL);
+                // Fixed Time Step Simulation Loop
+                // Ensures physics runs at exactly 1x speed regardless of FPS (60hz, 144hz, etc)
+                while (accumulator >= FIXED_TIME_STEP) {
+                    await simulation.step(inferenceRenderer, INFERENCE_INTERVAL);
+                    accumulator -= FIXED_TIME_STEP;
+                }
             }
 
             controls.update();
             renderer.render(scene, camera);
         }
+
 
         function canonicalizeQuaternion(q) {
             // Prefer w > 0 (or x > 0 if w == 0) for consistent sign
@@ -850,7 +807,6 @@
                 initInferenceScene();
                 initInput();
                 loadModel();
-                createWalls(1.0);
 
                 updateLoadingStatus('Loading ONNX models...');
                 await simulation.initialize();

@@ -78,13 +78,14 @@ export class InferenceManager {
                 try {
                     console.log(`    Trying ${provider} backend...`);
 
-                    const response = await fetch('http://69.197.134.3:8081/models/pose_model_final.onnx');
-                    if (!response.ok) throw new Error('Failed to fetch model');
+                    // const response = await fetch('http://69.197.134.3:8081/models/pose_model_final.onnx');
+                    //if (!response.ok) throw new Error('Failed to fetch model');
 
-                    const arrayBuffer = await response.arrayBuffer();
-                    console.log('Model loaded into browser memory!');
+                    //const arrayBuffer = await response.arrayBuffer();
+                    //console.log('Model loaded into browser memory!');
 
-                    this.poseSession = await ort.InferenceSession.create(arrayBuffer, {
+                    //this.poseSession = await ort.InferenceSession.create(arrayBuffer, {
+                    this.poseSession = await ort.InferenceSession.create('static/models/pose_model_best.onnx', {
                         executionProviders: [provider],
                         graphOptimizationLevel: 'all'
                     });

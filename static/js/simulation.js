@@ -19,17 +19,17 @@ export class SimulationController {
         // Callbacks for UI updates
         this.onStateUpdate = null;
         this.onInferenceUpdate = null;
+        this.onTorqueUpdate = null;
 
-                // In constructor
+        // History for RL observations
         this.oriHistory = [
-            [0, 0, 0, 1],  // quat from 2 frames ago (identity)
+            [0, 0, 0, 1],  // quat from 2 frames ago
             [0, 0, 0, 1]   // quat from 1 frame ago
         ];
         this.actionHistory = [
             [0, 0, 0],     // action from 2 frames ago
             [0, 0, 0]      // action from 1 frame ago
         ];
-
     }
 
     /**
@@ -38,8 +38,6 @@ export class SimulationController {
     async initialize() {
         console.log('Initializing simulation...');
 
-
-        
         try {
             // Load ONNX models
             await this.inference.loadModels();
@@ -54,7 +52,6 @@ export class SimulationController {
             throw error;
         }
     }
-
 
     /**
      * Start the simulation loop
@@ -92,13 +89,18 @@ export class SimulationController {
 
     /**
      * Step the simulation (called every frame)
-     * @param {HTMLCanvasElement} inferenceCanvas - Canvas for inference rendering
-     * @param {number} inferenceInterval - Run inference every N frames
      */
     async step(inferenceCanvas = null, inferenceInterval = 15) {
         if (!this.isRunning) return null;
 
         this.frameCount++;
+
+        // Setup torque callback
+        this.physics.onTorqueApplied = (torque) => {
+            if (this.onTorqueUpdate) {
+                this.onTorqueUpdate(torque);
+            }
+        };
 
         // Run inference periodically
         if (inferenceCanvas && this.frameCount % inferenceInterval === 0) {
@@ -111,7 +113,7 @@ export class SimulationController {
         }
 
         // Step physics
-        const state = this.physics.step(4); // 4 substeps like PyBullet
+        const state = this.physics.step(4);
         this.stepCount = state.step_count;
 
         // Notify UI
@@ -124,13 +126,11 @@ export class SimulationController {
 
     /**
      * Run pose inference from canvas
-     * @param {THREE.WebGLRenderer} renderer - The renderer that has just rendered the inference scene
      */
     async runInference(renderer) {
         if (!this.inference.ready()) return;
 
         try {
-            // Get the canvas from the renderer (it's already been rendered)
             const canvas = renderer.domElement;
 
             // Predict pose from inference camera
@@ -151,63 +151,92 @@ export class SimulationController {
     }
 
     /**
-     * Predict RL action and apply to physics
+     * Predict RL action from PREDICTED physics state
      */
-    /**
-         * Predict RL action and apply to physics
-         * Uses PREDICTED quaternion from inference (not actual physics state)
-         */
     async predictAndApplyAction() {
-        if (!this.physics.predictedQuaternion) {
-            this.physics.setAction([0, 0, 0]);
-            return;
-        }
         try {
-            // Canonicalize predicted quaternion for consistent RL observations
-            const predQuat = this.physics.normalizeAndCanonicalizeQuaternion(this.physics.predictedQuaternion);
-            // Compute z-axis from predicted quaternion
-            const cannonQuat = { x: predQuat[0], y: predQuat[1], z: predQuat[2], w: predQuat[3] };
-            const zAxis = this.physics.quaternionToZAxis(cannonQuat);
+            // Priority: Use PREDICTED quaternion from vision
+            // Fallback: Use ACTUAL physics quaternion (e.g. if vision not ready)
+            let rawQuat = this.physics.predictedQuaternion;
 
-            // Compute orientation one-hot from predicted z-axis
-            const prevQuat = this.oriHistory[1];
-            const angVelEst = [
-                predQuat[0] - prevQuat[0],
-                predQuat[1] - prevQuat[1],
-                predQuat[2] - prevQuat[2]
-            ];
-
-            // Construct observation (length 23)
-            const observation = [
-                predQuat[0], predQuat[1], predQuat[2], predQuat[3], // 4 - current quat
-                zAxis[0], zAxis[1], zAxis[2],                       // 3 - current z-axis
-                zAxis[0], zAxis[1], zAxis[2],                       // 3 - z-axis (same)
-                ...this.oriHistory[0],                              // 4 - quat from 2 frames ago
-                angVelEst[0], angVelEst[1], angVelEst[2],           // 3 - angular velocity estimate (from quat diff)
-                ...this.actionHistory[0],                           // 3 - action from 2 frames ago
-                ...this.actionHistory[1]                            // 3 - action from 1 frame ago
-            ];
-            
-            if (this.frameCount % 60 === 0) {
-                console.log('Observation length:', observation.length); // should be 27
-                console.log('Observation:', observation);
+            if (!rawQuat) {
+                // console.warn("No predicted quaternion yet, using ground truth");
+                const state = this.physics.getState();
+                rawQuat = state.quaternion; // [x, y, z, w]
             }
+
+            // CRITICAL: Coordinate Transformation for RL Model
+            // Client (Three.js/Cannon): Y-Up
+            // Training (PyBullet): Z-Up
+            // Transformation: (x, y, z) -> (x, z, -y)
+
+            // 1. Swizzle Quaternion
+            // Client: [x, y, z, w] -> Training: [x, z, -y, w]
+            const trainingQuat = {
+                x: rawQuat[0],
+                y: rawQuat[2],
+                z: -rawQuat[1],
+                w: rawQuat[3]
+            };
+
+            // 2. Compute Z-Axis (in Training Frame)
+            // Since we swizzled the quat to Training Frame, this helper calculates the Training Z-axis
+            const zAxis = this.physics.quaternionToZAxis(trainingQuat);
+
+            // 3. Compute Angular Velocity Estimate (in Training Frame)
+            const prevTrainingQuat = this.oriHistory[1]; // Already stored as [x, z, -y, w]
+
+            // Note: We need to ensure history is stored in Training Frame!
+            // If history was stored in RAW frame, we'd need to swizzle it here.
+            // Let's look at where history is updated: Lines 198-199
+
+            // Current approach: Let's calculate AngVel from RAW and then Swizzle
+            const prevRawQuat = this._lastRawQuat || rawQuat;
+            const rawAngVelEst = [
+                rawQuat[0] - prevRawQuat[0],
+                rawQuat[1] - prevRawQuat[1],
+                rawQuat[2] - prevRawQuat[2]
+            ];
+
+            const trainingAngVelEst = [
+                rawAngVelEst[0],
+                rawAngVelEst[2],      // y -> z
+                -rawAngVelEst[1]      // z -> -y
+            ];
+
+            // Build 23-feature observation (Training Frame)
+            const observation = new Float32Array([
+                trainingQuat.x, trainingQuat.y, trainingQuat.z, trainingQuat.w,       // 4: current quat
+                zAxis[0], zAxis[1], zAxis[2],                                         // 3: z-axis
+                zAxis[0], zAxis[1], zAxis[2],                                         // 3: z-axis (clean)
+                ...this.oriHistory[0],                                                // 4: prev quat (must be training frame!)
+                trainingAngVelEst[0], trainingAngVelEst[1], trainingAngVelEst[2],     // 3: ang vel estimate
+                ...this.actionHistory[0],                                             // 3: action t-1
+                ...this.actionHistory[1]                                              // 3: action t-2
+            ]);
+
+            // if (this.frameCount % 60 === 0) {
+            //    console.log('Obs (Training Frame):', observation.slice(0, 4));
+            // }
 
             const action = await this.inference.predictAction(observation);
             this.physics.setAction(action);
 
             // Update history for next frame
+            // Store EVERYTHING in Training Frame for consistency
             this.oriHistory[0] = this.oriHistory[1];
-            this.oriHistory[1] = [...predQuat];
+            this.oriHistory[1] = [trainingQuat.x, trainingQuat.y, trainingQuat.z, trainingQuat.w];
+
             this.actionHistory[0] = this.actionHistory[1];
             this.actionHistory[1] = [...action];
+
+            this._lastRawQuat = [...rawQuat];
 
         } catch (error) {
             console.error('RL action prediction error:', error);
             this.physics.setAction([0, 0, 0]);
         }
     }
-
 
     /**
      * Enable/disable RL control
@@ -239,14 +268,15 @@ export class SimulationController {
     }
 
     /**
-     * Teleport box to position
+     * Teleport box
      */
     teleportBox(position, quaternion = null) {
         this.physics.teleportBox(position, quaternion);
     }
 
-    // ============== DRAG CONTROLS ==============
-
+    /**
+     * Drag controls
+     */
     grabBox(point) {
         this.physics.grabBox(point);
     }
@@ -259,30 +289,18 @@ export class SimulationController {
         this.physics.releaseBox();
     }
 
-    /**
-     * Get current physics state
-     */
     getState() {
         return this.physics.getState();
     }
 
-    /**
-     * Get physics body for Three.js sync
-     */
     getBoxBody() {
         return this.physics.boxBody;
     }
 
-    /**
-     * Check if models are ready
-     */
     isReady() {
         return this.inference.ready();
     }
 
-    /**
-     * Check if models are loading
-     */
     isLoading() {
         return this.inference.loading();
     }

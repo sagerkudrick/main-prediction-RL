@@ -1,8 +1,8 @@
 /**
- * Physics Simulation using Cannon.js
- * Replaces PyBullet backend with client-side physics
+ * Physics Simulation using Cannon.js - PYBULLET COMPATIBLE
+ * Observation format: quat (4) + ang_vel (3) + z_axis (3) + orientation_onehot (6) = 16 features
+ * Training used: quat(4) + z_axis(3) + z_noisy(3) + prev_quat(4) + ang_vel_est(3) + action_t-1(3) + action_t-2(3) = 23
  */
-
 import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
 
 export class PhysicsSimulation {
@@ -16,39 +16,42 @@ export class PhysicsSimulation {
         this.wallSize = 1.0;
         this.rlEnabled = false;
         this.predictedQuaternion = null;
-        this.boxSize = new CANNON.Vec3(0.1, 0.1, 0.1); // Default half-extents
-        this.meshData = null; // Stores { vertices, faces } for ConvexPolyhedron
-        this._gravity = -2; // Match PyBullet gravity
-        this.magnitude = 1;
+        this.boxSize = new CANNON.Vec3(0.1, 0.1, 0.1);
+        this.meshData = null;
+
+        // History for matching training format
+        this.oriHistory = [];
+        this.actionHistory = [];
+        this.angVelEstimate = [0, 0, 0];
+
+        // Torque ramping (from training)
+        this.maxTorque = 0.5;
+        this.rampSpeed = 0.5;
+        this.targetTorque = [0, 0, 0];
+        this.currentTorqueApplied = [0, 0, 0];
     }
 
     /**
      * Initialize the physics world
      */
     start() {
-        // Create physics world
         this.world = new CANNON.World();
-        this.world.gravity.set(0, this._gravity, 0); // Match PyBullet gravity
+        this.world.gravity.set(0, -9.81, 0);
 
-        // Set timestep to match PyBullet (1/240 seconds)
-        this.world.defaultContactMaterial.contactEquationStiffness = 1e7;
-        this.world.defaultContactMaterial.contactEquationRelaxation = 4;
+        this.world.defaultContactMaterial.contactEquationStiffness = 1e6;
+        this.world.defaultContactMaterial.contactEquationRelaxation = 3;
+        this.world.defaultContactMaterial.friction = 0.3;
 
-        // Broadphase for better performance
         this.world.broadphase = new CANNON.NaiveBroadphase();
         this.world.solver.iterations = 10;
 
-        // Create ground plane
         const groundShape = new CANNON.Plane();
-        this.planeBody = new CANNON.Body({ mass: 0 }); // mass = 0 makes it static
+        this.planeBody = new CANNON.Body({ mass: 0 });
         this.planeBody.addShape(groundShape);
-        this.planeBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Rotate to be horizontal
+        this.planeBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
         this.world.addBody(this.planeBody);
 
-        // Create walls
         this.createWalls(this.wallSize);
-
-        // Reset to spawn the box
         this.reset();
 
         return true;
@@ -58,16 +61,13 @@ export class PhysicsSimulation {
      * Create 4 walls around the center
      */
     createWalls(size) {
-        // Remove existing walls
         this.wallBodies.forEach(wall => this.world.removeBody(wall));
         this.wallBodies = [];
 
         this.wallSize = size;
         const halfSize = size / 2.0;
         const height = 2.0;
-        const thickness = 1.0; // Very thick walls to prevent tunneling
-
-        console.log(`Creating walls: size=${size}, halfSize=${halfSize}, height=${height}, thickness=${thickness}`);
+        const thickness = 0.1;
 
         // North wall (Z-)
         const northShape = new CANNON.Box(new CANNON.Vec3(halfSize + thickness, height, thickness));
@@ -76,7 +76,6 @@ export class PhysicsSimulation {
         northBody.position.set(0, height, -halfSize - thickness);
         this.world.addBody(northBody);
         this.wallBodies.push(northBody);
-        console.log(`North wall at Z=${-halfSize - thickness}`);
 
         // South wall (Z+)
         const southShape = new CANNON.Box(new CANNON.Vec3(halfSize + thickness, height, thickness));
@@ -85,7 +84,6 @@ export class PhysicsSimulation {
         southBody.position.set(0, height, halfSize + thickness);
         this.world.addBody(southBody);
         this.wallBodies.push(southBody);
-        console.log(`South wall at Z=${halfSize + thickness}`);
 
         // East wall (X+)
         const eastShape = new CANNON.Box(new CANNON.Vec3(thickness, height, halfSize));
@@ -94,7 +92,6 @@ export class PhysicsSimulation {
         eastBody.position.set(halfSize + thickness, height, 0);
         this.world.addBody(eastBody);
         this.wallBodies.push(eastBody);
-        console.log(`East wall at X=${halfSize + thickness}`);
 
         // West wall (X-)
         const westShape = new CANNON.Box(new CANNON.Vec3(thickness, height, halfSize));
@@ -103,33 +100,26 @@ export class PhysicsSimulation {
         westBody.position.set(-halfSize - thickness, height, 0);
         this.world.addBody(westBody);
         this.wallBodies.push(westBody);
-        console.log(`West wall at X=${-halfSize - thickness}`);
-        console.log(`Total walls created: ${this.wallBodies.length}`);
     }
 
     /**
      * Reset the box to initial position
      */
     reset() {
-        // Remove existing box if any
         if (this.boxBody && this.world) {
             this.world.removeBody(this.boxBody);
         }
 
         let shape;
         if (this.meshData) {
-            // Create Trimesh from mesh data (supports concave geometry)
             const vertices = this.meshData.vertices;
             const indices = this.meshData.indices;
-
             shape = new CANNON.Trimesh(vertices, indices);
-            console.log(`Created Trimesh with ${vertices.length / 3} vertices and ${indices.length / 3} triangles`);
         } else {
-            // Fallback to box
             shape = new CANNON.Box(this.boxSize);
         }
 
-        // Generate random orientation for ragdoll effect
+        // Random orientation
         const randomAxis = new CANNON.Vec3(
             Math.random() - 0.5,
             Math.random() - 0.5,
@@ -140,64 +130,130 @@ export class PhysicsSimulation {
         const randomQuat = new CANNON.Quaternion();
         randomQuat.setFromAxisAngle(randomAxis, randomAngle);
 
-        // Create box body with mass
         this.boxBody = new CANNON.Body({
-            mass: 1.0, // 1kg mass
+            mass: 0.05, // Matching URDF mass (was 1.0)
             shape: shape,
-            position: new CANNON.Vec3(0, 1.5, 0), // Start in center, slightly elevated
-            quaternion: randomQuat, // Random orientation
-            linearDamping: 0.1,  // Increased from 0.01 for better stability
-            angularDamping: 0.1  // Increased from 0.01 for better stability
+            position: new CANNON.Vec3(0, 1.5, 0),
+            quaternion: randomQuat,
+            linearDamping: 0.04,
+            angularDamping: 0.04
         });
 
-        // Allow sleeping to prevent jitter when at rest
-        this.boxBody.allowSleep = true;
-        this.boxBody.sleepSpeedLimit = 0.1;  // Speed below which body can sleep
-        this.boxBody.sleepTimeLimit = 0.5;   // Time body must be slow before sleeping
+        // Override inertia to match URDF exactly [0.0001, 0.0001, 0.0001]
+        // This is critical because Trimesh auto-inertia is often wrong/infinite
+        this.boxBody.inertia.set(0.0001, 0.0001, 0.0001);
+        this.boxBody.invInertia.set(10000, 10000, 10000); // 1 / 0.0001
 
-        // Add to world
+        this.boxBody.allowSleep = false;
+
         if (this.world) {
             this.world.addBody(this.boxBody);
         }
 
-        // Reset state
         this.stepCount = 0;
         this.currentAction.set(0, 0, 0);
-        this.predictedQuaternion = null;
+        this.currentTorqueApplied = [0, 0, 0];
+        this.targetTorque = [0, 0, 0];
 
+        // Initialize history
+        this.oriHistory = [
+            [randomQuat.x, randomQuat.y, randomQuat.z, randomQuat.w],
+            [randomQuat.x, randomQuat.y, randomQuat.z, randomQuat.w]
+        ];
+        this.actionHistory = [
+            [0, 0, 0],
+            [0, 0, 0]
+        ];
+        this.angVelEstimate = [0, 0, 0];
+
+        this.predictedQuaternion = null;
         return this.getState();
     }
 
     /**
      * Step the physics simulation
      */
+    /**
+        * Step the physics simulation
+        */
     step(numSteps = 4) {
-        const timeStep = 1.0 / 240.0; // Match PyBullet timestep
+        const timeStep = 1.0 / 240.0;
 
-        // Default action
-        const action = this.currentAction || new THREE.Vector3(0, 0, 0);
-        
         for (let i = 0; i < numSteps; i++) {
-            // Convert action to torque vector, scaled for control
-            const torque = new CANNON.Vec3(
-                action.x * this.magnitude,
-                action.y * this.magnitude,
-                action.z * this.magnitude
-            );
+            // Random disturbance (3% chance from training)
+            if (Math.random() < 0.03) {
+                const dx = (Math.random() - 0.5) * 0.4;
+                const dy = (Math.random() - 0.5) * 0.4;
+                const dz = (Math.random() - 0.5) * 0.4;
 
-            // Apply torque in local frame (LINK_FRAME equivalent)
+                const worldDist = new CANNON.Vec3(dx, dy, dz);
+                this.boxBody.quaternion.vmult(worldDist, worldDist);
+                this.boxBody.torque.vadd(worldDist, this.boxBody.torque);
+            }
+
+            // Torque ramping
+            this.targetTorque[0] = this.currentAction.x * this.maxTorque;
+            this.targetTorque[1] = this.currentAction.y * this.maxTorque;
+            this.targetTorque[2] = this.currentAction.z * this.maxTorque;
+
+            // Low-pass filter
+            this.currentTorqueApplied[0] = this.currentTorqueApplied[0] * (1.0 - this.rampSpeed) + this.targetTorque[0] * this.rampSpeed;
+            this.currentTorqueApplied[1] = this.currentTorqueApplied[1] * (1.0 - this.rampSpeed) + this.targetTorque[1] * this.rampSpeed;
+            this.currentTorqueApplied[2] = this.currentTorqueApplied[2] * (1.0 - this.rampSpeed) + this.targetTorque[2] * this.rampSpeed;
+
+            // Clamp
+            this.currentTorqueApplied[0] = Math.max(-this.maxTorque, Math.min(this.maxTorque, this.currentTorqueApplied[0]));
+            this.currentTorqueApplied[1] = Math.max(-this.maxTorque, Math.min(this.maxTorque, this.currentTorqueApplied[1]));
+            this.currentTorqueApplied[2] = Math.max(-this.maxTorque, Math.min(this.maxTorque, this.currentTorqueApplied[2]));
+
+            // Apply torque in local frame
+            const torque = new CANNON.Vec3(
+                this.currentTorqueApplied[0],
+                this.currentTorqueApplied[1],
+                this.currentTorqueApplied[2]
+            );
             const worldTorque = new CANNON.Vec3();
             this.boxBody.quaternion.vmult(torque, worldTorque);
-
-            // Incrementally add torque
             this.boxBody.torque.vadd(worldTorque, this.boxBody.torque);
 
-            // Step physics
+            // Step physics once
             this.world.step(timeStep);
             this.stepCount++;
+
+            // Callback on first substep only
+            if (i === 0 && this.onTorqueApplied) {
+                this.onTorqueApplied(this.currentTorqueApplied);
+            }
         }
 
+        // Update history after all substeps
+        this._updateHistory();
+
         return this.getState();
+    }
+
+
+    /**
+     * Update observation history
+     */
+    _updateHistory() {
+        const quat = this.boxBody.quaternion;
+
+        // Shift history
+        this.oriHistory[0] = this.oriHistory[1];
+        this.oriHistory[1] = [quat.x, quat.y, quat.z, quat.w];
+
+        // Estimate angular velocity from quaternion delta
+        const dq = [
+            this.oriHistory[1][0] - this.oriHistory[0][0],
+            this.oriHistory[1][1] - this.oriHistory[0][1],
+            this.oriHistory[1][2] - this.oriHistory[0][2]
+        ];
+        this.angVelEstimate = [
+            Math.max(-1.0, Math.min(1.0, dq[0])),
+            Math.max(-1.0, Math.min(1.0, dq[1])),
+            Math.max(-1.0, Math.min(1.0, dq[2]))
+        ];
     }
 
     /**
@@ -207,13 +263,13 @@ export class PhysicsSimulation {
         const pos = this.boxBody.position;
         const quat = this.boxBody.quaternion;
         const angVel = this.boxBody.angularVelocity;
-        // Canonicalize quaternion for consistent sign
+
         const canonicalQuat = this.normalizeAndCanonicalizeQuaternion([quat.x, quat.y, quat.z, quat.w]);
-        // Check termination (matching PyBullet logic)
         const terminated = this.stepCount >= 500 || pos.y < 0.05;
+
         return {
             position: [pos.x, pos.y, pos.z],
-            quaternion: canonicalQuat,  // Use canonical quaternion
+            quaternion: canonicalQuat,
             angular_velocity: [angVel.x, angVel.y, angVel.z],
             step_count: this.stepCount,
             terminated: terminated,
@@ -222,25 +278,29 @@ export class PhysicsSimulation {
     }
 
     /**
-     * Get observation for RL model (matching PyBullet format)
+     * Get observation matching training format (23 features)
      */
     getObservation() {
-        const quat = this.predictedQuaternion;
-        const angVel = this.boxBody.angularVelocity;
+        if (!this.boxBody) {
+            return new Float32Array(23);
+        }
 
-        // Compute z-axis from quaternion
-        const zAxis = this.quaternionToZAxis(quat);
+        const quat = this.boxBody.quaternion;
 
-        // Compute orientation one-hot
-        const orientation = this.zAxisToOrientationOneHot(zAxis);
+        // Compute z-axis
+        //const zAxis = this.quaternionToZAxis(quat);
+        const zAxis = this.quaternionToZAxis(this.predictedQuaternion);
 
-        // Construct observation: quat (4) + ang_vel (3) + z_axis (3) + orientation (6)
-        return [
-            quat.x, quat.y, quat.z, quat.w,
-            angVel.x, angVel.y, angVel.z,
-            zAxis[0], zAxis[1], zAxis[2],
-            ...orientation
-        ];
+        // 23 features matching training
+        return new Float32Array([
+            quat.x, quat.y, quat.z, quat.w,                                      // 4: current quat
+            zAxis[0], zAxis[1], zAxis[2],                                         // 3: z-axis
+            zAxis[0], zAxis[1], zAxis[2],                                      // 3: noisy z-axis
+            this.oriHistory[0][0], this.oriHistory[0][1], this.oriHistory[0][2], this.oriHistory[0][3],  // 4: prev quat
+            this.angVelEstimate[0], this.angVelEstimate[1], this.angVelEstimate[2],  // 3: ang vel estimate
+            this.actionHistory[0][0], this.actionHistory[0][1], this.actionHistory[0][2],  // 3: action t-1
+            this.actionHistory[1][0], this.actionHistory[1][1], this.actionHistory[1][2]   // 3: action t-2
+        ]);
     }
 
     /**
@@ -254,7 +314,22 @@ export class PhysicsSimulation {
      * Set RL action to apply
      */
     setAction(action) {
-        this.currentAction.set(action[0], action[1], action[2]);
+        // Update action history
+        let x_axis = action[0];
+        let y_axis = -action[2];
+        let z_axis = action[1];
+
+        this.actionHistory[0] = this.actionHistory[1];
+        this.actionHistory[1] = [x_axis, y_axis, z_axis];
+
+        // FLIP Y and Z axes to match Cannon.js (PyBullet Z-up → Cannon Y-up)
+        // PyBullet: X, Y, Z → Cannon: X, Z, Y (with Y flip)
+        this.currentAction.set(
+            x_axis,      // X stays the same
+            y_axis,      // Z becomes Y
+            z_axis      // Y becomes -Z (flipped)
+        );
+
     }
 
     /**
@@ -273,14 +348,10 @@ export class PhysicsSimulation {
     teleportBox(position, quaternion = null) {
         if (!this.boxBody) return;
 
-        // Reset velocities
         this.boxBody.velocity.set(0, 0, 0);
         this.boxBody.angularVelocity.set(0, 0, 0);
-
-        // Set position
         this.boxBody.position.set(position[0], position[1], position[2]);
 
-        // Set quaternion if provided
         if (quaternion) {
             this.boxBody.quaternion.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
         }
@@ -294,14 +365,7 @@ export class PhysicsSimulation {
     }
 
     /**
-     * Update wall size
-     */
-    updateWalls(size) {
-        this.createWalls(size);
-    }
-
-    /**
-     * Set box size (half-extents)
+     * Set box size
      */
     setBoxSize(x, y, z) {
         this.boxSize.set(x, y, z);
@@ -309,9 +373,7 @@ export class PhysicsSimulation {
     }
 
     /**
-     * Set mesh shape from vertices and indices
-     * @param {Array} vertices - Flat array of vertices [x, y, z, ...]
-     * @param {Array} indices - Flat array of indices [i, j, k, ...]
+     * Set mesh shape
      */
     setMeshShape(vertices, indices) {
         this.meshData = { vertices, indices };
@@ -320,86 +382,59 @@ export class PhysicsSimulation {
 
     // ============== MOUSE INTERACTION ==============
 
-    /**
-     * Grab the box at a specific point
-     * @param {Array} point - World point [x, y, z] where the click happened
-     */
     grabBox(point) {
         if (!this.boxBody) return;
 
-        // Create a kinematic body for the mouse cursor
         if (!this.mouseBody) {
             this.mouseBody = new CANNON.Body({
-                mass: 0, // static/kinematic
+                mass: 0,
                 type: CANNON.Body.KINEMATIC,
                 position: new CANNON.Vec3(point[0], point[1], point[2])
             });
-            this.mouseBody.collisionFilterGroup = 0; // Don't collide with anything
+            this.mouseBody.collisionFilterGroup = 0;
             this.world.addBody(this.mouseBody);
         } else {
             this.mouseBody.position.set(point[0], point[1], point[2]);
         }
 
-        // Calculate local point on the box
         const worldPoint = new CANNON.Vec3(point[0], point[1], point[2]);
         const localPoint = new CANNON.Vec3();
         this.boxBody.pointToLocalFrame(worldPoint, localPoint);
 
-        // Create constraint
         this.mouseConstraint = new CANNON.PointToPointConstraint(
             this.boxBody,
             localPoint,
             this.mouseBody,
             new CANNON.Vec3(0, 0, 0)
         );
-
         this.world.addConstraint(this.mouseConstraint);
-
-        // Limit force to prevent "explosive" movement
         this.mouseConstraint.collideConnected = false;
 
-        // Increase damping while dragging for stability
         this.boxBody.linearDamping = 0.5;
         this.boxBody.angularDamping = 0.5;
-
-        // Wake up the body
         this.boxBody.wakeUp();
     }
 
-    /**
-     * Move the grabbed point
-     * @param {Array} point - New world point [x, y, z]
-     */
     moveGrabbed(point) {
         if (this.mouseBody) {
             this.mouseBody.position.set(point[0], point[1], point[2]);
-            // Wake up body to ensure physics keeps running
             if (this.boxBody) this.boxBody.wakeUp();
         }
     }
 
-    /**
-     * Release the box
-     */
     releaseBox() {
         if (this.mouseConstraint) {
             this.world.removeConstraint(this.mouseConstraint);
-            this.world.removeConstraint(this.mouseConstraint);
             this.mouseConstraint = null;
         }
-
-        // Restore original damping
         if (this.boxBody) {
-            this.boxBody.linearDamping = 0.1;
-            this.boxBody.angularDamping = 0.1;
+            this.boxBody.linearDamping = 0.04;
+            this.boxBody.angularDamping = 0.04;
         }
     }
 
     // ============== HELPER FUNCTIONS ==============
 
-    /**
-     * Normalize quaternion to unit length
-     */
     normalizeQuaternion(q) {
         const norm = Math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
         if (norm < 1e-8) {
@@ -416,24 +451,14 @@ export class PhysicsSimulation {
         return normalized;
     }
 
-    /**
-     * Convert quaternion to z-axis vector
-     */
     quaternionToZAxis(quat) {
-        // Rotation matrix from quaternion
         const x = quat.x, y = quat.y, z = quat.z, w = quat.w;
-
-        // Z-axis is the third column of rotation matrix
         const zx = 2 * (x * z + w * y);
         const zy = 2 * (y * z - w * x);
         const zz = 1 - 2 * (x * x + y * y);
-
         return [zx, zy, zz];
     }
 
-    /**
-     * Convert z-axis to one-hot orientation (matching training)
-     */
     zAxisToOrientationOneHot(zAxis) {
         const threshold = 0.7;
         const orientation = [0, 0, 0, 0, 0, 0];
@@ -445,16 +470,11 @@ export class PhysicsSimulation {
         else if (zAxis[1] > threshold) orientation[4] = 1;
         else if (zAxis[1] < -threshold) orientation[5] = 1;
 
-        return orientation; // length 6
+        return orientation;
     }
 
-
-    /**
-     * Cleanup
-     */
     close() {
         if (this.world) {
-            // Cannon.js doesn't need explicit cleanup, but we can clear references
             this.world = null;
             this.boxBody = null;
             this.planeBody = null;
