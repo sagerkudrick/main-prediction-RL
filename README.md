@@ -1,162 +1,211 @@
-# Client-Side Isotope Box RL Controller
+# 🧠 Client-Side Reinforcement Learning for 3D Orientation Control
 
-A fully client-side physics simulation with reinforcement learning, running entirely in the browser using Cannon.js and ONNX Runtime Web. No backend required!
+**End-to-end ML + RL + 3D physics system running entirely in the browser.**  
+This project generates synthetic data, trains deep learning and reinforcement learning models, converts them to ONNX, and deploys everything to a **fully client-side WebGPU/WebGL simulation** — no backend required at inference time.
 
-## 🚀 Quick Start
+---
 
-### Step 1: Convert Models to ONNX
+## 🎥 Live Project Previews (In-Browser)
 
-Before deploying, you need to convert the PyTorch models to ONNX format:
+### 🔄 Reinforcement Learning Re-Orientation
+A trained RL policy actively re-orients the 3D engine model upright in real time.
 
-```bash
-cd backend
-python convert_models.py
-```
+![RL Orientation Control](img/final-orientation.gif)
 
-This will generate:
-- `static/models/pose_model.onnx` - Pose prediction model
-- `static/models/rl_policy.onnx` - RL policy model
+---
 
-**Requirements for conversion:**
-```bash
-pip install torch torchvision onnx onnxruntime stable-baselines3 gymnasium numpy scipy
-```
+### 🧠 Orientation Prediction Model
+Left: live rendered object  
+Right: neural network orientation prediction output
 
-### Step 2: Test Locally
+![Orientation Prediction](img/predictions.gif)
 
-Serve the application with a local HTTP server:
+---
 
-```bash
-# Using Python
-python -m http.server 8000
+### 🧪 Synthetic Dataset Generation
+Synthetic vision dataset generated in Blender with randomized rotations and recorded ground-truth quaternions.
 
-# Using Node.js
-npx http-server -p 8000
+![Synthetic Dataset](img/synthetic.gif)
 
-# Using PHP
-php -S localhost:8000
-```
+---
 
-Then open `http://localhost:8000` in your browser.
+## 🚀 Project Summary
 
-### Step 3: Deploy to Cloudflare Pages
+This project demonstrates a **full ML lifecycle** — from data generation to deployment — applied to a real-time 3D control problem.
 
-1. **Create a new Cloudflare Pages project**
-   - Go to [Cloudflare Pages](https://pages.cloudflare.com/)
-   - Click "Create a project"
-   - Connect your Git repository (or upload files directly)
+**High-level pipeline:**
 
-2. **Build settings**
-   - Framework preset: `None`
-   - Build command: (leave empty)
-   - Build output directory: `/`
-   - Root directory: `/`
+1. Generate a **synthetic image dataset** using Blender and Python scripting
+2. Train a **deep learning model** to predict 3D orientation (quaternions)
+3. Train a **reinforcement learning policy** to re-orient the object upright
+4. Export trained models to **ONNX**
+5. Run **real-time ML inference + physics simulation entirely in the browser**
 
-3. **Deploy**
-   - Cloudflare will automatically deploy your site
-   - Your app will be available at `https://your-project.pages.dev`
+Everything runs locally in JavaScript using WebGPU/WebGL, ONNX Runtime Web, and a physics engine.
+
+---
+
+## 🧩 System Architecture
+
+Blender (Synthetic Data Generation)
+↓
+PyTorch Orientation Model (Quaternion Prediction)
+↓
+Reinforcement Learning Policy (Upright Control)
+↓
+ONNX Export
+↓
+Browser Inference (ONNX Runtime Web)
+↓
+Cannon.js Physics + Three.js Rendering
+
+
+---
+
+## 🧪 1. Synthetic Dataset Generation
+
+To avoid real-world data collection, I created a **fully synthetic dataset**:
+
+- Built a **Blender scene** with a 3D engine model
+- Used **Blender Python scripting** to:
+  - Randomly rotate the object across SO(3)
+  - Render images from a fixed camera
+  - Record **ground-truth orientation as quaternions**
+- Exported image + quaternion pairs for training
+
+This approach enables:
+- Perfect labels
+- Unlimited data
+- Full control over distribution and augmentation
+
+---
+
+## 🧠 2. Orientation Prediction Model
+
+I trained a neural network to **predict the object’s orientation directly from images**.
+
+**Details:**
+- Framework: **PyTorch**
+- Input: rendered RGB images
+- Output: object orientation (quaternion)
+- Loss: rotation-aware loss (normalized quaternion regression)
+- Training performed on an **external GPU server**
+
+### Remote Training & Deployment
+- Connected to a GPU server via **SSH**
+- Training pipeline automated
+- After training completion:
+  - Model artifacts automatically deployed to an **NGINX directory**
+  - Pulled directly into the web application
+
+This simulates a lightweight **CI/CD workflow for ML models**.
+
+---
+
+## 🎮 3. Reinforcement Learning Policy
+
+I trained a **reinforcement learning agent** to actively re-orient the object upright.
+
+**RL setup:**
+- Environment: physics-based 3D orientation task
+- Observation: predicted orientation + physics state
+- Action space: rotational torque
+- Objective: minimize angular error from upright pose
+
+**Result:**
+- The policy learns to flip and stabilize the object in real time
+- Policy generalizes across initial orientations
+
+---
+
+## 🌐 4. Fully Client-Side Web Simulation
+
+The final system runs **entirely in the browser**.
+
+### Browser Stack
+- **Three.js** — 3D rendering
+- **Cannon.js** — physics simulation
+- **ONNX Runtime Web** — ML inference
+- **WebGPU / WebGL** — GPU-accelerated rendering
+
+### Runtime Loop
+1. Render camera view of the object
+2. Run orientation prediction (ONNX)
+3. Feed prediction into RL policy (ONNX)
+4. Apply torque to physics body
+5. Step physics simulation
+6. Sync physics → renderer
+7. Repeat at ~60 FPS
+
+No Python. No server. No network latency.
+
+---
 
 ## 📁 Project Structure
 
-```
 main-prediction-RL/
-├── index.html                  # Main application (client-side only)
+├── index.html # Client-side application
+├── img/ # Project GIFs (previews)
+│ ├── final-orientation.gif
+│ ├── predictions.gif
+│ └── synthetic.gif
 ├── static/
-│   ├── css/
-│   │   └── style.css          # Styles with loading overlay
-│   ├── js/
-│   │   ├── physics.js         # Cannon.js physics simulation
-│   │   ├── inference.js       # ONNX model inference
-│   │   └── simulation.js      # Main simulation controller
-│   ├── models/
-│   │   ├── isotopebox.glb     # 3D model
-│   │   ├── pose_model.onnx    # Pose prediction (generated)
-│   │   └── rl_policy.onnx     # RL policy (generated)
+│ ├── css/
+│ ├── js/
+│ │ ├── physics.js # Cannon.js simulation
+│ │ ├── inference.js # ONNX inference
+│ │ └── simulation.js # Main loop
+│ └── models/
+│ ├── pose_model.onnx
+│ └── rl_policy.onnx
 └── backend/
-    ├── convert_models.py      # Model conversion script
-    ├── server.py              # Simple static file server
-    ├── pose_model_final.pt    # Original PyTorch model
-    └── isotope_upright_with_xyz_arrows.zip  # Original RL model
-```
+├── convert_models.py # PyTorch → ONNX
+└── training artifacts
 
-## 🎮 Features
 
-- **Client-Side Physics**: Cannon.js physics engine (no server needed)
-- **Browser ML Inference**: ONNX Runtime Web for pose prediction and RL policy
-- **Real-time Simulation**: Physics runs at 60 FPS in the browser
-- **Interactive Controls**: Drag, position controls, wall size adjustment
-- **RL Integration**: Toggle RL-based rotation control
-- **Zero Backend**: Fully static site, deployable anywhere
+---
 
-## 🔧 Technology Stack
+## 🛠️ Full Technology Stack
 
-- **Physics**: [Cannon.js](https://github.com/pmndrs/cannon-es) - JavaScript physics engine
-- **ML Inference**: [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/) - Browser-based ML
-- **3D Rendering**: [Three.js](https://threejs.org/) - WebGL rendering
-- **Model Format**: ONNX (converted from PyTorch)
+### Machine Learning
+- PyTorch
+- ONNX / ONNX Runtime
+- Reinforcement Learning (policy optimization)
+- Quaternion math & rotation representations
 
-## 📊 How It Works
+### 3D & Simulation
+- Blender (data generation + scripting)
+- Three.js
+- Cannon.js (physics)
+- WebGPU / WebGL
 
-1. **Initialization**
-   - Load ONNX models (pose prediction + RL policy)
-   - Initialize Cannon.js physics world
-   - Set up Three.js rendering
+### Infrastructure & DevOps
+- Remote GPU training via SSH
+- Automated model export & deployment
+- NGINX static hosting
+- Fully static cloud deployment (Cloudflare Pages)
 
-2. **Simulation Loop** (every frame)
-   - Render inference camera view
-   - Run pose prediction (every 15 frames)
-   - Predict RL action from observation
-   - Apply torque to physics body
-   - Step physics simulation (4 substeps)
-   - Update Three.js visualization
+---
 
-3. **Physics Sync**
-   - Cannon.js handles physics simulation
-   - Three.js meshes sync with physics bodies
-   - Drag controls update physics positions
+## 💼 Skills Demonstrated (Recruiter-Friendly)
 
-## 🎯 Controls
+- Synthetic data generation for computer vision
+- Deep learning model training & evaluation
+- Reinforcement learning for continuous control
+- Physics-based simulation
+- Model optimization & ONNX deployment
+- Browser-based ML inference
+- 3D graphics & real-time rendering
+- Full ML lifecycle ownership (data → model → deployment)
+- Production-style ML workflows
 
-- **Start/Stop**: Control simulation loop
-- **Reset**: Reset crate to initial position
-- **RL Toggle**: Enable/disable RL-based rotation
-- **Wall Size**: Adjust boundary walls (0.5m - 5.0m)
-- **Position Controls**: Fine-tune crate position (±0.1m increments)
-- **Drag**: Click and drag the crate in 3D space
+---
 
-## 🐛 Troubleshooting
+## 📌 Why This Project Matters
 
-### Models not loading
-- Ensure you ran `convert_models.py` successfully
-- Check browser console for ONNX loading errors
-- Verify `.onnx` files exist in `static/models/`
+This project shows the ability to:
+- Build **ML systems, not just models**
+- Work across **ML, RL, 3D, web, and infrastructure**
+- Deploy performant ML **outside Python**
+- Design systems suitable for **real-time, interactive environments**
 
-### Physics behaving differently
-- Cannon.js parameters are tuned to match PyBullet
-- Check timestep (1/240s) and gravity (-9.81 m/s²)
-- Verify mass and damping values
-
-### CORS errors
-- Must serve via HTTP server (not `file://`)
-- Use `python -m http.server` or similar
-
-## 📝 Notes
-
-- **Model Size**: ONNX models are ~45MB (pose) + ~1MB (RL)
-- **Performance**: Runs at 60 FPS on modern browsers
-- **Compatibility**: Tested on Chrome, Firefox, Edge
-- **Mobile**: Works on mobile but performance may vary
-
-## 🔄 Differences from Python Version
-
-| Feature | Python/PyBullet | JavaScript/Cannon.js |
-|---------|----------------|---------------------|
-| Physics Engine | PyBullet | Cannon.js |
-| ML Framework | PyTorch + SB3 | ONNX Runtime Web |
-| Server | Flask (required) | None (static) |
-| Deployment | Needs Python server | Cloudflare Pages (free) |
-| Latency | Network round-trip | Local (instant) |
-
-## 📄 License
-
-Same as original project.
