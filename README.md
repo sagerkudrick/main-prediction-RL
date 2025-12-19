@@ -70,7 +70,7 @@ Everything runs locally in JavaScript using WebGPU/WebGL, ONNX Runtime Web, and 
 ## 🧩 System Architecture
 
 <p align="center">
-  <img src="img/pipeline.png" size="50%">
+  <img src="img/pipeline.png" width="50%" height="50%">
 </p>
 
 
