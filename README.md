@@ -46,19 +46,11 @@ Everything runs locally in JavaScript using WebGPU/WebGL, ONNX Runtime Web, and 
 ---
 
 ## 🧩 System Architecture
-```
-Blender (Synthetic Data Generation)
-↓
-PyTorch Orientation Model (Quaternion Prediction)
-↓
-Reinforcement Learning Policy (Upright Control)
-↓
-ONNX Export
-↓
-Browser Inference (ONNX Runtime Web)
-↓
-Cannon.js Physics + Three.js Rendering
-```
+
+<p align="center">
+  <img src="img/pipeline.png" width="900">
+</p>
+
 
 ---
 
