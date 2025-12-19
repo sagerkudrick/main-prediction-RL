@@ -8,7 +8,7 @@ This project generates synthetic data, trains deep learning and reinforcement le
 ## 🎥 Live Project Previews (In-Browser)
 
 ### 🔄 Reinforcement Learning Re-Orientation
-A trained RL policy actively re-orients the 3D engine model upright in real time.
+A trained RL policy actively re-orients the 3D engine model upright in real time, whose actions are based on predicated quarternions from our orientation prediction model.
 
 ![RL Orientation Control](img/final-orientation.gif)
 
