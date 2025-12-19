@@ -143,6 +143,7 @@ No Python. No server. No network latency.
 
 ## 📁 Project Structure
 
+```
 main-prediction-RL/
 ├── index.html # Client-side application
 ├── img/ # Project GIFs (previews)
@@ -161,6 +162,7 @@ main-prediction-RL/
 └── backend/
 ├── convert_models.py # PyTorch → ONNX
 └── training artifacts
+```
 
 
 ---
