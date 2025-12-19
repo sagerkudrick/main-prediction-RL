@@ -190,7 +190,7 @@ main-prediction-RL/
 
 ---
 
-## 💼 Skills Demonstrated (Recruiter-Friendly)
+## 💼 Skills Demonstrated
 
 - Synthetic data generation for computer vision
 - Deep learning model training & evaluation
