@@ -16,7 +16,7 @@ A trained RL policy actively re-orients the 3D engine model upright in real time
 
 ### 🧠 Orientation Prediction Model
 Left: live rendered object  
-Right: neural network orientation prediction output
+Right: neural network orientation prediction output, whose output is fed to our RL policy to re-orientate our model upright.
 
 ![Orientation Prediction](img/predictions.gif)
 
