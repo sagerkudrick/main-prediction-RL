@@ -8,24 +8,46 @@ This project generates synthetic data, trains deep learning and reinforcement le
 ## 🎥 Live Project Previews (In-Browser)
 
 ### 🔄 Reinforcement Learning Re-Orientation
-A trained RL policy actively re-orients the 3D engine model upright in real time, whose actions are based on predicated quarternions from our orientation prediction model.
 
-![RL Orientation Control](img/final-orientation.gif)
+<p align="center">
+  <em>
+    A trained RL policy actively re-orients the 3D engine model upright in real time.
+    Actions are based on predicted quaternions from the orientation model.
+  </em>
+</p>
+
+<p align="center">
+  <img src="img/final-orientation.gif" width="720">
+</p>
 
 ---
 
 ### 🧠 Orientation Prediction Model
-Left: live rendered object  
-Right: Neural network predicted quarternions. Predicted quarternions are applied to a separate model to visualize predicted quarternions.
 
-![Orientation Prediction](img/predictions.gif)
+<p align="center">
+  <em>
+    Left: live rendered object · Right: neural network predicted quaternions
+  </em>
+</p>
+
+<p align="center">
+  <img src="img/predictions.gif" width="720">
+</p>
 
 ---
 
 ### 🧪 Synthetic Dataset Generation
-Synthetic vision dataset generated in Blender with randomized rotations and recorded ground-truth quaternions.
 
-![Synthetic Dataset](img/synthetic.gif)
+<p align="center">
+  <em>
+    Synthetic dataset generated in Blender with randomized SO(3) rotations
+    and ground-truth quaternion labels.
+  </em>
+</p>
+
+<p align="center">
+  <img src="img/synthetic.gif" width="720">
+</p>
 
 ---
 
