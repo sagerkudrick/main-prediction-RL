@@ -8,7 +8,7 @@ This project generates synthetic data, trains deep learning and reinforcement le
 ## 🎥 Live Project Previews (In-Browser)
 
 ### 🔄 Reinforcement Learning Re-Orientation
-A trained RL policy actively re-orients the 3D engine model upright in real time.
+A trained RL policy actively re-orients the 3D engine model upright in real time, whose actions are based on predicated quarternions from our orientation prediction model.
 
 ![RL Orientation Control](img/final-orientation.gif)
 
@@ -16,7 +16,7 @@ A trained RL policy actively re-orients the 3D engine model upright in real time
 
 ### 🧠 Orientation Prediction Model
 Left: live rendered object  
-Right: neural network orientation prediction output
+Right: Neural network predicted quarternions. Predicted quarternions are applied to a separate model to visualize predicted quarternions.
 
 ![Orientation Prediction](img/predictions.gif)
 
@@ -46,7 +46,7 @@ Everything runs locally in JavaScript using WebGPU/WebGL, ONNX Runtime Web, and 
 ---
 
 ## 🧩 System Architecture
-
+```
 Blender (Synthetic Data Generation)
 ↓
 PyTorch Orientation Model (Quaternion Prediction)
@@ -58,7 +58,7 @@ ONNX Export
 Browser Inference (ONNX Runtime Web)
 ↓
 Cannon.js Physics + Three.js Rendering
-
+```
 
 ---
 
@@ -108,13 +108,13 @@ I trained a **reinforcement learning agent** to actively re-orient the object up
 
 **RL setup:**
 - Environment: physics-based 3D orientation task
-- Observation: predicted orientation + physics state
+- Observation: Noisy orientation (to generalize for loss in predicted quaternions in final product) + physics state
 - Action space: rotational torque
 - Objective: minimize angular error from upright pose
 
 **Result:**
-- The policy learns to flip and stabilize the object in real time
-- Policy generalizes across initial orientations
+- The policy learns to flip and stabilize the object in real time given noisy XYZW quaternions
+- Policy generalizes across initial, randomized orientations
 
 ---
 
@@ -143,6 +143,7 @@ No Python. No server. No network latency.
 
 ## 📁 Project Structure
 
+```
 main-prediction-RL/
 ├── index.html # Client-side application
 ├── img/ # Project GIFs (previews)
@@ -154,13 +155,15 @@ main-prediction-RL/
 │ ├── js/
 │ │ ├── physics.js # Cannon.js simulation
 │ │ ├── inference.js # ONNX inference
-│ │ └── simulation.js # Main loop
+│ │ ├── simulation.js # Main loop
+│ │ └── vis_torque.js # Draw RL actions onto model
 │ └── models/
-│ ├── pose_model.onnx
-│ └── rl_policy.onnx
+│ ├── pose_model.onnx # Model to predict quarternions from an image
+│ ├── engine.glb # 3D Engine model
+│ └── rl_policy.onnx # Reinforced learning policy for orientating our object
 └── backend/
-├── convert_models.py # PyTorch → ONNX
-└── training artifacts
+├── server.py # Backend to serve files
+```
 
 
 ---
@@ -187,7 +190,7 @@ main-prediction-RL/
 
 ---
 
-## 💼 Skills Demonstrated (Recruiter-Friendly)
+## 💼 Skills Demonstrated
 
 - Synthetic data generation for computer vision
 - Deep learning model training & evaluation
