@@ -46,7 +46,7 @@ Everything runs locally in JavaScript using WebGPU/WebGL, ONNX Runtime Web, and 
 ---
 
 ## 🧩 System Architecture
-
+```
 Blender (Synthetic Data Generation)
 ↓
 PyTorch Orientation Model (Quaternion Prediction)
@@ -58,7 +58,7 @@ ONNX Export
 Browser Inference (ONNX Runtime Web)
 ↓
 Cannon.js Physics + Three.js Rendering
-
+```
 
 ---
 
