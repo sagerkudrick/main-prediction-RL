@@ -6,7 +6,9 @@
 
 ## What It Does
 
-Trains a neural network to predict 3D object orientation from images, then deploys an RL policy that actively re-orients objects upright in real time, all running client-side in the browser at 60 FPS.
+- Trains a neural network to predict 3D object rotation from images
+- Trains an RL policy that flips objects right-side up given an objects rotation
+- Converts the orientation and RL models to ONNX and deploys them to actively re-orientate our object in real-time, given predicted orientations, all running client-side in the browser.
 
 ---
 
